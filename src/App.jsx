@@ -1,4 +1,20 @@
 import { useState, useEffect, useRef } from "react";
+import { initializeApp } from "firebase/app";
+import { getFirestore, collection, addDoc, deleteDoc, doc, onSnapshot, query, orderBy } from "firebase/firestore";
+
+// Firebase configuration
+const firebaseConfig = {
+  apiKey: "AIzaSyCbR_ACTdL9_IeV6agEtxWb56bWKwkOO8s",
+  authDomain: "grocery-app-5fa03.firebaseapp.com",
+  projectId: "grocery-app-5fa03",
+  storageBucket: "grocery-app-5fa03.firebasestorage.app",
+  messagingSenderId: "161144194083",
+  appId: "1:161144194083:web:c2e9da8c036d16e39c5d96",
+  measurementId: "G-1MVD3024P3"
+};
+
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
 
 const PRIORITY_CONFIG = {
   red: { label: "דחוף", color: "#E53935", bg: "#FFEBEE", icon: "🔴" },
@@ -13,24 +29,6 @@ function formatDate(iso) {
   const day = String(d.getDate()).padStart(2, "0");
   const month = String(d.getMonth() + 1).padStart(2, "0");
   return `${day}/${month} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-}
-
-function loadData() {
-  try {
-    const raw = localStorage.getItem("grocery-data");
-    if (raw) return JSON.parse(raw);
-  } catch (e) {
-    console.error("Load error:", e);
-  }
-  return { items: [], history: [] };
-}
-
-function saveData(items, history) {
-  try {
-    localStorage.setItem("grocery-data", JSON.stringify({ items, history }));
-  } catch (e) {
-    console.error("Save error:", e);
-  }
 }
 
 function SwipeItem({ children, onSwipe }) {
@@ -96,35 +94,56 @@ function SwipeItem({ children, onSwipe }) {
 }
 
 export default function GroceryApp() {
-  const initial = loadData();
-  const [items, setItems] = useState(initial.items);
-  const [history, setHistory] = useState(initial.history);
+  const [items, setItems] = useState([]);
+  const [history, setHistory] = useState(() => {
+    try {
+      const raw = localStorage.getItem("grocery-history");
+      return raw ? JSON.parse(raw) : [];
+    } catch { return []; }
+  });
   const [currentUser, setCurrentUser] = useState(USERS[0]);
   const [showAdd, setShowAdd] = useState(false);
   const [inputValue, setInputValue] = useState("");
   const [priority, setPriority] = useState("yellow");
   const [suggestions, setSuggestions] = useState([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
+  const [loading, setLoading] = useState(true);
   const inputRef = useRef(null);
 
-  // Save whenever items or history change
+  // Listen to Firestore in real-time
   useEffect(() => {
-    saveData(items, history);
-  }, [items, history]);
+    const q = query(collection(db, "items"), orderBy("date", "desc"));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const newItems = snapshot.docs.map((doc) => ({
+        id: doc.id,
+        ...doc.data(),
+      }));
+      setItems(newItems);
+      setLoading(false);
+    });
+    return () => unsubscribe();
+  }, []);
 
-  const addItem = () => {
+  // Save history to localStorage
+  useEffect(() => {
+    localStorage.setItem("grocery-history", JSON.stringify(history));
+  }, [history]);
+
+  const addItem = async () => {
     const name = inputValue.trim();
     if (!name) return;
-    const newItem = {
-      id: Date.now(),
-      name,
-      priority,
-      addedBy: currentUser,
-      date: new Date().toISOString(),
-    };
-    setItems((prev) => [newItem, ...prev]);
-    if (!history.includes(name)) {
-      setHistory((prev) => [...prev, name]);
+    try {
+      await addDoc(collection(db, "items"), {
+        name,
+        priority,
+        addedBy: currentUser,
+        date: new Date().toISOString(),
+      });
+      if (!history.includes(name)) {
+        setHistory((prev) => [...prev, name]);
+      }
+    } catch (e) {
+      console.error("Error adding item:", e);
     }
     setInputValue("");
     setPriority("yellow");
@@ -132,8 +151,12 @@ export default function GroceryApp() {
     setShowSuggestions(false);
   };
 
-  const removeItem = (id) => {
-    setItems((prev) => prev.filter((i) => i.id !== id));
+  const removeItem = async (id) => {
+    try {
+      await deleteDoc(doc(db, "items", id));
+    } catch (e) {
+      console.error("Error removing item:", e);
+    }
   };
 
   const onInput = (val) => {
@@ -162,6 +185,13 @@ export default function GroceryApp() {
     const order = { red: 0, yellow: 1, green: 2 };
     return order[a.priority] - order[b.priority];
   });
+
+  if (loading)
+    return (
+      <div style={{ display: "flex", justifyContent: "center", alignItems: "center", height: "100vh", fontFamily: "'Rubik', sans-serif" }}>
+        <p style={{ color: "#888", fontSize: 18 }}>טוען...</p>
+      </div>
+    );
 
   return (
     <div
@@ -396,7 +426,6 @@ export default function GroceryApp() {
             const cfg = PRIORITY_CONFIG[item.priority];
             return (
               <div key={item.id} style={{ position: "relative", overflow: "hidden", borderRadius: 16 }}>
-                {/* Delete bg */}
                 <div
                   style={{
                     position: "absolute",
