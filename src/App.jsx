@@ -22,8 +22,6 @@ const PRIORITY_CONFIG = {
   green: { label: "עדיפות נמוכה", color: "#43A047", bg: "#E8F5E9", icon: "🟢" },
 };
 
-const USERS = ["אני", "בת הזוג"];
-
 function formatDate(iso) {
   const d = new Date(iso);
   const day = String(d.getDate()).padStart(2, "0");
@@ -93,7 +91,73 @@ function SwipeItem({ children, onSwipe }) {
   );
 }
 
+// Name setup screen
+function NameSetup({ onSave }) {
+  const [name, setName] = useState("");
+  return (
+    <div dir="rtl" style={{
+      fontFamily: "'Rubik', sans-serif",
+      maxWidth: 480,
+      margin: "0 auto",
+      minHeight: "100vh",
+      background: "linear-gradient(165deg, #FAFAFA 0%, #F0EDE8 100%)",
+      display: "flex",
+      flexDirection: "column",
+      alignItems: "center",
+      justifyContent: "center",
+      padding: 24,
+    }}>
+      <link href="https://fonts.googleapis.com/css2?family=Rubik:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+      <div style={{ fontSize: 64, marginBottom: 20 }}>🛒</div>
+      <h1 style={{ fontSize: 24, fontWeight: 700, color: "#2D3436", marginBottom: 8 }}>רשימת קניות</h1>
+      <p style={{ fontSize: 15, color: "#888", marginBottom: 32, fontWeight: 300 }}>איך קוראים לך?</p>
+      <input
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        onKeyDown={(e) => e.key === "Enter" && name.trim() && onSave(name.trim())}
+        placeholder="הכנס את השם שלך"
+        autoFocus
+        style={{
+          width: "100%",
+          maxWidth: 280,
+          padding: "14px 16px",
+          border: "2px solid #E8E5E0",
+          borderRadius: 14,
+          fontSize: 18,
+          fontFamily: "inherit",
+          outline: "none",
+          textAlign: "center",
+          direction: "rtl",
+          marginBottom: 16,
+        }}
+      />
+      <button
+        onClick={() => name.trim() && onSave(name.trim())}
+        disabled={!name.trim()}
+        style={{
+          width: "100%",
+          maxWidth: 280,
+          border: "none",
+          background: name.trim() ? "linear-gradient(135deg, #2D3436, #636E72)" : "#ccc",
+          color: "#fff",
+          borderRadius: 14,
+          padding: "14px",
+          fontSize: 16,
+          fontWeight: 600,
+          fontFamily: "inherit",
+          cursor: name.trim() ? "pointer" : "default",
+        }}
+      >
+        בואו נתחיל ✓
+      </button>
+    </div>
+  );
+}
+
 export default function GroceryApp() {
+  const [userName, setUserName] = useState(() => {
+    return localStorage.getItem("grocery-username") || "";
+  });
   const [items, setItems] = useState([]);
   const [history, setHistory] = useState(() => {
     try {
@@ -101,7 +165,6 @@ export default function GroceryApp() {
       return raw ? JSON.parse(raw) : [];
     } catch { return []; }
   });
-  const [currentUser, setCurrentUser] = useState(USERS[0]);
   const [showAdd, setShowAdd] = useState(false);
   const [inputValue, setInputValue] = useState("");
   const [priority, setPriority] = useState("yellow");
@@ -109,6 +172,11 @@ export default function GroceryApp() {
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [loading, setLoading] = useState(true);
   const inputRef = useRef(null);
+
+  const saveName = (name) => {
+    localStorage.setItem("grocery-username", name);
+    setUserName(name);
+  };
 
   // Listen to Firestore in real-time
   useEffect(() => {
@@ -136,7 +204,7 @@ export default function GroceryApp() {
       await addDoc(collection(db, "items"), {
         name,
         priority,
-        addedBy: currentUser,
+        addedBy: userName,
         date: new Date().toISOString(),
       });
       if (!history.includes(name)) {
@@ -180,6 +248,11 @@ export default function GroceryApp() {
   useEffect(() => {
     if (showAdd && inputRef.current) inputRef.current.focus();
   }, [showAdd]);
+
+  // Show name setup if no name saved
+  if (!userName) {
+    return <NameSetup onSave={saveName} />;
+  }
 
   const sorted = [...items].sort((a, b) => {
     const order = { red: 0, yellow: 1, green: 2 };
@@ -226,34 +299,15 @@ export default function GroceryApp() {
               {items.length} פריטים ברשימה
             </p>
           </div>
-          <div
-            style={{
-              display: "flex",
-              background: "rgba(255,255,255,0.12)",
-              borderRadius: 12,
-              padding: 3,
-            }}
-          >
-            {USERS.map((u) => (
-              <button
-                key={u}
-                onClick={() => setCurrentUser(u)}
-                style={{
-                  border: "none",
-                  padding: "8px 16px",
-                  borderRadius: 10,
-                  fontSize: 13,
-                  fontWeight: currentUser === u ? 600 : 400,
-                  fontFamily: "inherit",
-                  cursor: "pointer",
-                  background: currentUser === u ? "#fff" : "transparent",
-                  color: currentUser === u ? "#2D3436" : "rgba(255,255,255,0.7)",
-                  transition: "all 0.2s",
-                }}
-              >
-                {u}
-              </button>
-            ))}
+          <div style={{
+            background: "rgba(255,255,255,0.12)",
+            borderRadius: 10,
+            padding: "8px 14px",
+            fontSize: 13,
+            color: "rgba(255,255,255,0.8)",
+            fontWeight: 400,
+          }}>
+            👋 {userName}
           </div>
         </div>
       </div>
