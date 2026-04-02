@@ -4,7 +4,7 @@ import { getFirestore, collection, addDoc, deleteDoc, doc, onSnapshot, query, or
 
 // Firebase configuration
 const firebaseConfig = {
-  apiKey: "AIzaSyCbR_ACTdL9_IeV6agEtxWb56bWKwkOO8s",
+  apiKey: "AIzaSyBRAaqDl5ywLm-wSOmvo-ucPxtVNdWjH7w",
   authDomain: "grocery-app-5fa03.firebaseapp.com",
   projectId: "grocery-app-5fa03",
   storageBucket: "grocery-app-5fa03.firebasestorage.app",
