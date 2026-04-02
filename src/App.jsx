@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef } from "react";
 
 const PRIORITY_CONFIG = {
   red: { label: "דחוף", color: "#E53935", bg: "#FFEBEE", icon: "🔴" },
@@ -13,6 +13,24 @@ function formatDate(iso) {
   const day = String(d.getDate()).padStart(2, "0");
   const month = String(d.getMonth() + 1).padStart(2, "0");
   return `${day}/${month} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
+
+function loadData() {
+  try {
+    const raw = localStorage.getItem("grocery-data");
+    if (raw) return JSON.parse(raw);
+  } catch (e) {
+    console.error("Load error:", e);
+  }
+  return { items: [], history: [] };
+}
+
+function saveData(items, history) {
+  try {
+    localStorage.setItem("grocery-data", JSON.stringify({ items, history }));
+  } catch (e) {
+    console.error("Save error:", e);
+  }
 }
 
 function SwipeItem({ children, onSwipe }) {
@@ -78,48 +96,21 @@ function SwipeItem({ children, onSwipe }) {
 }
 
 export default function GroceryApp() {
-  const [items, setItems] = useState([]);
-  const [history, setHistory] = useState([]);
+  const initial = loadData();
+  const [items, setItems] = useState(initial.items);
+  const [history, setHistory] = useState(initial.history);
   const [currentUser, setCurrentUser] = useState(USERS[0]);
   const [showAdd, setShowAdd] = useState(false);
   const [inputValue, setInputValue] = useState("");
   const [priority, setPriority] = useState("yellow");
   const [suggestions, setSuggestions] = useState([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
-  const [loaded, setLoaded] = useState(false);
   const inputRef = useRef(null);
 
-  // Load from storage
+  // Save whenever items or history change
   useEffect(() => {
-    (async () => {
-      try {
-        const r1 = await window.storage.get("grocery-data");
-        if (r1?.value) {
-          const parsed = JSON.parse(r1.value);
-          setItems(parsed.items || []);
-          setHistory(parsed.history || []);
-        }
-      } catch (e) {
-        console.log("No saved data yet");
-      }
-      setLoaded(true);
-    })();
-  }, []);
-
-  // Save to storage
-  useEffect(() => {
-    if (!loaded) return;
-    (async () => {
-      try {
-        await window.storage.set(
-          "grocery-data",
-          JSON.stringify({ items, history })
-        );
-      } catch (e) {
-        console.error("Save error:", e);
-      }
-    })();
-  }, [items, history, loaded]);
+    saveData(items, history);
+  }, [items, history]);
 
   const addItem = () => {
     const name = inputValue.trim();
@@ -171,13 +162,6 @@ export default function GroceryApp() {
     const order = { red: 0, yellow: 1, green: 2 };
     return order[a.priority] - order[b.priority];
   });
-
-  if (!loaded)
-    return (
-      <div style={{ display: "flex", justifyContent: "center", alignItems: "center", height: "100vh", fontFamily: "'Rubik', sans-serif" }}>
-        <p style={{ color: "#888", fontSize: 18 }}>טוען...</p>
-      </div>
-    );
 
   return (
     <div
