@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { initializeApp } from "firebase/app";
 import { getFirestore, collection, addDoc, deleteDoc, doc, onSnapshot, query, orderBy } from "firebase/firestore";
-import { getAuth, signInAnonymously, onAuthStateChanged } from "firebase/auth";
+import { getAuth, signInAnonymously } from "firebase/auth";
 
 // Firebase configuration
 const firebaseConfig = {
@@ -109,7 +109,6 @@ function NameSetup({ onSave }) {
       justifyContent: "center",
       padding: 24,
     }}>
-      <link href="https://fonts.googleapis.com/css2?family=Rubik:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
       <div style={{ fontSize: 64, marginBottom: 20 }}>🛒</div>
       <h1 style={{ fontSize: 24, fontWeight: 700, color: "#2D3436", marginBottom: 8 }}>רשימת קניות</h1>
       <p style={{ fontSize: 15, color: "#888", marginBottom: 32, fontWeight: 300 }}>איך קוראים לך?</p>
@@ -176,13 +175,15 @@ export default function GroceryApp() {
   const [authReady, setAuthReady] = useState(false);
   const inputRef = useRef(null);
 
-  // Sign in anonymously — transparent to the user
+  // Sign in anonymously — transparent to the user.
+  // authStateReady() resolves from cache instantly for returning users.
   useEffect(() => {
-    signInAnonymously(auth).catch((e) => console.error("Auth error:", e));
-    const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
-      if (user) setAuthReady(true);
-    });
-    return () => unsubscribeAuth();
+    auth.authStateReady()
+      .then(() => {
+        if (!auth.currentUser) return signInAnonymously(auth);
+      })
+      .then(() => setAuthReady(true))
+      .catch((e) => console.error("Auth error:", e));
   }, []);
 
   const saveName = (name) => {
@@ -292,7 +293,6 @@ export default function GroceryApp() {
         overflow: "hidden",
       }}
     >
-      <link href="https://fonts.googleapis.com/css2?family=Rubik:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
 
       {/* Header */}
       <div
