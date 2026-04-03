@@ -568,26 +568,9 @@ export default function GroceryApp() {
                         <span style={{ fontSize: 12, color: "#AAA", fontWeight: 300 }}>
                           📅 {formatDate(item.date)}
                         </span>
-                        {(() => {
-                          const uc = getUserColor(item.addedBy);
-                          return (
-                            <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
-                              <span style={{
-                                width: 18, height: 18, borderRadius: "50%",
-                                background: uc.color,
-                                color: "#fff",
-                                fontSize: 10, fontWeight: 700,
-                                display: "flex", alignItems: "center", justifyContent: "center",
-                                flexShrink: 0,
-                              }}>
-                                {item.addedBy.charAt(0).toUpperCase()}
-                              </span>
-                              <span style={{ fontSize: 12, color: uc.color, fontWeight: 500 }}>
-                                {item.addedBy}
-                              </span>
-                            </span>
-                          );
-                        })()}
+                        <span style={{ fontSize: 12, color: getUserColor(item.addedBy).color, fontWeight: 500 }}>
+                          👤 {item.addedBy}
+                        </span>
                       </div>
                     </div>
                     <div
