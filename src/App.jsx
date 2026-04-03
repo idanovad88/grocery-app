@@ -24,6 +24,27 @@ const PRIORITY_CONFIG = {
   green: { label: "עדיפות נמוכה", color: "#43A047", bg: "#E8F5E9", icon: "🟢" },
 };
 
+// Distinct colors — deliberately avoids red/yellow/green (used for priority)
+const USER_COLORS = [
+  { color: "#2980B9", bg: "#EBF5FB" }, // blue
+  { color: "#8E44AD", bg: "#F5EEF8" }, // purple
+  { color: "#E67E22", bg: "#FEF9E7" }, // orange
+  { color: "#00897B", bg: "#E0F2F1" }, // teal
+  { color: "#D81B60", bg: "#FCE4EC" }, // pink
+  { color: "#3949AB", bg: "#E8EAF6" }, // indigo
+  { color: "#0097A7", bg: "#E0F7FA" }, // cyan
+  { color: "#E64A19", bg: "#FBE9E7" }, // deep orange
+];
+
+function getUserColor(name) {
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) {
+    hash = ((hash << 5) - hash) + name.charCodeAt(i);
+    hash = hash & hash;
+  }
+  return USER_COLORS[Math.abs(hash) % USER_COLORS.length];
+}
+
 function formatDate(iso) {
   const d = new Date(iso);
   const day = String(d.getDate()).padStart(2, "0");
@@ -547,9 +568,26 @@ export default function GroceryApp() {
                         <span style={{ fontSize: 12, color: "#AAA", fontWeight: 300 }}>
                           📅 {formatDate(item.date)}
                         </span>
-                        <span style={{ fontSize: 12, color: "#AAA", fontWeight: 300 }}>
-                          👤 {item.addedBy}
-                        </span>
+                        {(() => {
+                          const uc = getUserColor(item.addedBy);
+                          return (
+                            <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                              <span style={{
+                                width: 18, height: 18, borderRadius: "50%",
+                                background: uc.color,
+                                color: "#fff",
+                                fontSize: 10, fontWeight: 700,
+                                display: "flex", alignItems: "center", justifyContent: "center",
+                                flexShrink: 0,
+                              }}>
+                                {item.addedBy.charAt(0).toUpperCase()}
+                              </span>
+                              <span style={{ fontSize: 12, color: uc.color, fontWeight: 500 }}>
+                                {item.addedBy}
+                              </span>
+                            </span>
+                          );
+                        })()}
                       </div>
                     </div>
                     <div
