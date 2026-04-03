@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { initializeApp } from "firebase/app";
 import { getFirestore, collection, addDoc, deleteDoc, doc, onSnapshot, query, orderBy } from "firebase/firestore";
+import { getAuth, signInAnonymously, onAuthStateChanged } from "firebase/auth";
 
 // Firebase configuration
 const firebaseConfig = {
@@ -15,6 +16,7 @@ const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
+const auth = getAuth(app);
 
 const PRIORITY_CONFIG = {
   red: { label: "דחוף", color: "#E53935", bg: "#FFEBEE", icon: "🔴" },
@@ -171,15 +173,26 @@ export default function GroceryApp() {
   const [suggestions, setSuggestions] = useState([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [authReady, setAuthReady] = useState(false);
   const inputRef = useRef(null);
+
+  // Sign in anonymously — transparent to the user
+  useEffect(() => {
+    signInAnonymously(auth).catch((e) => console.error("Auth error:", e));
+    const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
+      if (user) setAuthReady(true);
+    });
+    return () => unsubscribeAuth();
+  }, []);
 
   const saveName = (name) => {
     localStorage.setItem("grocery-username", name);
     setUserName(name);
   };
 
-  // Listen to Firestore in real-time
+  // Listen to Firestore in real-time — only after auth is ready
   useEffect(() => {
+    if (!authReady) return;
     const q = query(collection(db, "items"), orderBy("date", "desc"));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const newItems = snapshot.docs.map((doc) => ({
@@ -190,7 +203,7 @@ export default function GroceryApp() {
       setLoading(false);
     });
     return () => unsubscribe();
-  }, []);
+  }, [authReady]);
 
   // Save history to localStorage
   useEffect(() => {
