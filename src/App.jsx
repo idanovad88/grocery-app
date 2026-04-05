@@ -215,6 +215,14 @@ function ShoppingScreen({ userName, onBack }) {
   const [history, setHistory] = useState(() => { try { return JSON.parse(localStorage.getItem("grocery-history")) || []; } catch { return []; } });
   const inputRef = useRef(null);
 
+  // Edit state
+  const [editingItem, setEditingItem]         = useState(null);
+  const [editItemName, setEditItemName]       = useState("");
+  const [editItemPriority, setEditItemPriority] = useState("yellow");
+
+  // Undo-delete state
+  const [pendingDelete, setPendingDelete] = useState(null);
+
   useEffect(() => {
     const q = query(collection(db, "items"), orderBy("date", "desc"));
     const unsub = onSnapshot(q, (snap) => { setItems(snap.docs.map((d) => ({ id: d.id, ...d.data() }))); setLoading(false); });
@@ -234,7 +242,25 @@ function ShoppingScreen({ userName, onBack }) {
     setInputValue(""); setPriority("yellow"); setShowAdd(false); setShowSuggestions(false);
   };
 
-  const removeItem = async (id) => { try { await deleteDoc(doc(db, "items", id)); } catch (e) { console.error(e); } };
+  const removeItem = (id, itemData) => {
+    const timerId = setTimeout(async () => {
+      try { await deleteDoc(doc(db, "items", id)); } catch (e) { console.error(e); }
+      setPendingDelete(null);
+    }, 4500);
+    setPendingDelete({ id, item: itemData, timerId });
+  };
+
+  const undoDelete = () => {
+    if (pendingDelete) { clearTimeout(pendingDelete.timerId); setPendingDelete(null); }
+  };
+
+  const openEditItem = (item) => { setEditingItem(item); setEditItemName(item.name); setEditItemPriority(item.priority); };
+  const closeEditItem = () => setEditingItem(null);
+  const updateItem = async () => {
+    if (!editItemName.trim()) return;
+    try { await updateDoc(doc(db, "items", editingItem.id), { name: editItemName.trim(), priority: editItemPriority }); closeEditItem(); }
+    catch (e) { console.error("Error updating item:", e); }
+  };
 
   const onInput = (val) => {
     setInputValue(val);
@@ -242,7 +268,9 @@ function ShoppingScreen({ userName, onBack }) {
     else setShowSuggestions(false);
   };
 
-  const sorted = [...items].sort((a, b) => ({ red:0, yellow:1, green:2 }[a.priority] - { red:0, yellow:1, green:2 }[b.priority]));
+  const sorted = [...items]
+    .filter((item) => item.id !== pendingDelete?.id)
+    .sort((a, b) => ({ red:0, yellow:1, green:2 }[a.priority] - { red:0, yellow:1, green:2 }[b.priority]));
 
   if (loading) return <Loader />;
 
@@ -294,7 +322,7 @@ function ShoppingScreen({ userName, onBack }) {
           </div>
         )}
 
-        {items.length > 0 && <p style={{ textAlign: "center", fontSize: 12, color: "#BBB", margin: "8px 0 12px", fontWeight: 300 }}>← החלק שמאלה למחיקה</p>}
+        {items.length > 0 && <p style={{ textAlign: "center", fontSize: 12, color: "#BBB", margin: "8px 0 12px", fontWeight: 300 }}>עריכה → | ← מחיקה</p>}
 
         {sorted.length === 0 && !showAdd && (
           <div style={{ textAlign: "center", padding: "60px 20px" }}>
@@ -308,7 +336,7 @@ function ShoppingScreen({ userName, onBack }) {
           {sorted.map((item) => {
             const cfg = PRIORITY_CONFIG[item.priority];
             return (
-              <SwipeItem key={item.id} onSwipeLeft={() => removeItem(item.id)}>
+              <SwipeItem key={item.id} onSwipeLeft={() => removeItem(item.id, item)} onSwipeRight={() => openEditItem(item)}>
                 <div style={{ background: "#fff", borderRadius: 16, padding: "16px 18px", display: "flex", alignItems: "center", gap: 14, boxShadow: "0 2px 8px rgba(0,0,0,0.04)", borderRight: `4px solid ${cfg.color}` }}>
                   <div style={{ width: 40, height: 40, borderRadius: 12, background: cfg.bg, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, flexShrink: 0 }}>{cfg.icon}</div>
                   <div style={{ flex: 1, minWidth: 0 }}>
@@ -327,6 +355,48 @@ function ShoppingScreen({ userName, onBack }) {
       </div>
 
       {!showAdd && <FAB onClick={() => setShowAdd(true)} color="linear-gradient(135deg, #2D3436, #636E72)" shadow="rgba(45,52,54,0.35)" />}
+
+      {/* ── Undo Delete Toast ── */}
+      {pendingDelete && (
+        <div style={{ position: "fixed", bottom: 104, left: "50%", transform: "translateX(-50%)", background: "#2D3436", color: "#fff", borderRadius: 14, padding: "12px 18px", display: "flex", alignItems: "center", gap: 14, zIndex: 60, boxShadow: "0 6px 24px rgba(0,0,0,0.3)", whiteSpace: "nowrap", animation: "slideUp 0.25s ease" }}>
+          <span style={{ fontSize: 14 }}>🗑️ "{pendingDelete.item.name}" נמחק</span>
+          <button onClick={undoDelete} style={{ background: "#636E72", border: "none", borderRadius: 8, padding: "6px 14px", color: "#fff", fontSize: 13, fontWeight: 600, fontFamily: "inherit", cursor: "pointer" }}>ביטול</button>
+        </div>
+      )}
+
+      {/* ── Edit Item Modal ── */}
+      {editingItem && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 100, display: "flex", alignItems: "flex-end", justifyContent: "center" }} onClick={(e) => { if (e.target === e.currentTarget) closeEditItem(); }}>
+          <div dir="rtl" style={{ background: "#fff", borderRadius: "24px 24px 0 0", padding: 24, width: "100%", maxWidth: 480, animation: "slideUp 0.3s ease" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+              <h3 style={{ margin: 0, fontSize: 17, fontWeight: 600, color: "#2D3436" }}>✏️ עריכת פריט</h3>
+              <button onClick={closeEditItem} style={{ background: "none", border: "none", fontSize: 22, cursor: "pointer", color: "#999", lineHeight: 1 }}>✕</button>
+            </div>
+            <input value={editItemName} onChange={(e) => setEditItemName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && updateItem()} placeholder="שם הפריט" autoFocus
+              style={inputStyle} onFocus={(e) => (e.target.style.borderColor = "#636E72")} onBlur={(e) => (e.target.style.borderColor = "#E8E5E0")} />
+            <div style={{ marginTop: 14 }}>
+              <p style={{ margin: "0 0 8px", fontSize: 13, fontWeight: 500, color: "#888" }}>רמת דחיפות:</p>
+              <div style={{ display: "flex", gap: 8 }}>
+                {Object.entries(PRIORITY_CONFIG).map(([key, cfg]) => (
+                  <button key={key} onClick={() => setEditItemPriority(key)}
+                    style={{ flex: 1, border: editItemPriority===key ? `2px solid ${cfg.color}` : "2px solid #E8E5E0", background: editItemPriority===key ? cfg.bg : "#FAFAFA", borderRadius: 12, padding: "10px 8px", cursor: "pointer", fontSize: 13, fontFamily: "inherit", fontWeight: editItemPriority===key ? 600 : 400, color: editItemPriority===key ? cfg.color : "#999", display: "flex", alignItems: "center", justifyContent: "center", gap: 4 }}>
+                    {cfg.icon} {cfg.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 8, marginTop: 16, paddingBottom: 8 }}>
+              <button onClick={updateItem} disabled={!editItemName.trim()}
+                style={{ flex: 1, border: "none", background: editItemName.trim() ? "linear-gradient(135deg, #2D3436, #636E72)" : "#ccc", color: "#fff", borderRadius: 12, padding: "14px", fontSize: 15, fontWeight: 600, fontFamily: "inherit", cursor: editItemName.trim() ? "pointer" : "default" }}>
+                שמור שינויים ✓
+              </button>
+              <button onClick={closeEditItem}
+                style={{ border: "2px solid #E8E5E0", background: "#fff", color: "#999", borderRadius: 12, padding: "14px 20px", fontSize: 15, fontFamily: "inherit", cursor: "pointer" }}>✕</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <GlobalStyles />
     </div>
   );
@@ -347,6 +417,9 @@ function CouponsScreen({ userName, onBack }) {
   const [uploading, setUploading] = useState(false);
   const [copiedId, setCopiedId] = useState(null);
   const fileInputRef = useRef(null);
+
+  // Undo-delete state
+  const [pendingDelete, setPendingDelete] = useState(null);
 
   // Edit state
   const [editingCoupon, setEditingCoupon]     = useState(null);
@@ -392,7 +465,17 @@ function CouponsScreen({ userName, onBack }) {
     setUploading(false);
   };
 
-  const removeCoupon = async (id) => { try { await deleteDoc(doc(db, "coupons", id)); } catch (e) { console.error(e); } };
+  const removeCoupon = (id, couponData) => {
+    const timerId = setTimeout(async () => {
+      try { await deleteDoc(doc(db, "coupons", id)); } catch (e) { console.error(e); }
+      setPendingDelete(null);
+    }, 4500);
+    setPendingDelete({ id, coupon: couponData, timerId });
+  };
+
+  const undoDelete = () => {
+    if (pendingDelete) { clearTimeout(pendingDelete.timerId); setPendingDelete(null); }
+  };
 
   const copyCode = (id, c) => { navigator.clipboard.writeText(c).then(() => { setCopiedId(id); setTimeout(() => setCopiedId(null), 2000); }); };
 
@@ -441,10 +524,12 @@ function CouponsScreen({ userName, onBack }) {
     setEditUploading(false);
   };
 
-  const sorted = [...coupons].sort((a, b) => {
-    const rank = (c) => { if (!c.expiryDate) return 1; const d = new Date(c.expiryDate)-new Date(); return d < 0 ? 3 : d < 604800000 ? 2 : 1; };
-    return rank(a) - rank(b);
-  });
+  const sorted = [...coupons]
+    .filter((c) => c.id !== pendingDelete?.id)
+    .sort((a, b) => {
+      const rank = (c) => { if (!c.expiryDate) return 1; const d = new Date(c.expiryDate)-new Date(); return d < 0 ? 3 : d < 604800000 ? 2 : 1; };
+      return rank(a) - rank(b);
+    });
 
   if (loading) return <Loader />;
 
@@ -526,7 +611,7 @@ function CouponsScreen({ userName, onBack }) {
             const uc        = getUserColor(coupon.addedBy);
             const isExpired = expiry && new Date(coupon.expiryDate) < new Date();
             return (
-              <SwipeItem key={coupon.id} borderRadius={18} onSwipeLeft={() => removeCoupon(coupon.id)} onSwipeRight={() => openEdit(coupon)}>
+              <SwipeItem key={coupon.id} borderRadius={18} onSwipeLeft={() => removeCoupon(coupon.id, coupon)} onSwipeRight={() => openEdit(coupon)}>
                 <div style={{ background: "#fff", borderRadius: 18, overflow: "hidden", boxShadow: "0 2px 12px rgba(0,0,0,0.06)", opacity: isExpired ? 0.6 : 1 }}>
                   {coupon.imageUrl && <img src={coupon.imageUrl} alt={coupon.title} style={{ width: "100%", height: 140, objectFit: "cover" }} />}
                   <div style={{ padding: "14px 16px" }}>
@@ -565,6 +650,14 @@ function CouponsScreen({ userName, onBack }) {
       </div>
 
       {!showAdd && <FAB onClick={() => setShowAdd(true)} color="linear-gradient(135deg, #8E44AD, #6C3483)" shadow="rgba(142,68,173,0.4)" />}
+
+      {/* ── Undo Delete Toast ── */}
+      {pendingDelete && (
+        <div style={{ position: "fixed", bottom: 104, left: "50%", transform: "translateX(-50%)", background: "#2D3436", color: "#fff", borderRadius: 14, padding: "12px 18px", display: "flex", alignItems: "center", gap: 14, zIndex: 60, boxShadow: "0 6px 24px rgba(0,0,0,0.3)", whiteSpace: "nowrap", animation: "slideUp 0.25s ease" }}>
+          <span style={{ fontSize: 14 }}>🗑️ "{pendingDelete.coupon.title}" נמחק</span>
+          <button onClick={undoDelete} style={{ background: "#8E44AD", border: "none", borderRadius: 8, padding: "6px 14px", color: "#fff", fontSize: 13, fontWeight: 600, fontFamily: "inherit", cursor: "pointer" }}>ביטול</button>
+        </div>
+      )}
 
       {/* ── Edit Modal ── */}
       {editingCoupon && (
