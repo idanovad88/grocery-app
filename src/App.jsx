@@ -466,10 +466,10 @@ function CouponsScreen({ userName, onBack }) {
       if (file) {
         imagePath = `coupons/${Date.now()}_${file.name}`;
         const storageRef = ref(storage, imagePath);
-        await uploadBytes(storageRef, file);
+        await uploadBytes(storageRef, file, { contentType: file.type });
         imageUrl = await getDownloadURL(storageRef);
       }
-      await addDoc(collection(db, "coupons"), { title: title.trim(), code: code.trim(), url: url.trim(), expiryDate, imageUrl, imagePath, addedBy: userName, date: new Date().toISOString() });
+      await addDoc(collection(db, "coupons"), { title: title.trim(), code: code.trim(), url: url.trim(), expiryDate, imageUrl, imagePath, fileType: file ? file.type : "", addedBy: userName, date: new Date().toISOString() });
       resetForm();
     } catch (e) { console.error("Error adding coupon:", e); }
     setUploading(false);
@@ -524,7 +524,7 @@ function CouponsScreen({ userName, onBack }) {
       if (editFile) {
         imagePath = `coupons/${Date.now()}_${editFile.name}`;
         const storageRef = ref(storage, imagePath);
-        await uploadBytes(storageRef, editFile);
+        await uploadBytes(storageRef, editFile, { contentType: editFile.type });
         imageUrl = await getDownloadURL(storageRef);
       }
       await updateDoc(doc(db, "coupons", editingCoupon.id), {
@@ -534,6 +534,7 @@ function CouponsScreen({ userName, onBack }) {
         expiryDate: editExpiryDate,
         imageUrl,
         imagePath,
+        fileType: editFile ? editFile.type : (editingCoupon.fileType || ""),
       });
       closeEdit();
     } catch (e) { console.error("Error updating coupon:", e); }
@@ -630,7 +631,18 @@ function CouponsScreen({ userName, onBack }) {
             return (
               <SwipeItem key={coupon.id} borderRadius={18} onSwipeLeft={() => removeCoupon(coupon.id, coupon)} onSwipeRight={() => openEdit(coupon)}>
                 <div style={{ background: "#fff", borderRadius: 18, overflow: "hidden", boxShadow: "0 2px 12px rgba(0,0,0,0.06)", opacity: isExpired ? 0.6 : 1 }}>
-                  {coupon.imageUrl && <img src={coupon.imageUrl} alt={coupon.title} style={{ width: "100%", height: 140, objectFit: "cover" }} />}
+                  {coupon.imageUrl && (
+                    coupon.fileType === "application/pdf" || coupon.imagePath?.toLowerCase().endsWith(".pdf") ? (
+                      <a href={coupon.imageUrl} target="_blank" rel="noopener noreferrer"
+                        style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, height: 72, background: "#F5EEF8", textDecoration: "none" }}>
+                        <span style={{ fontSize: 26 }}>📄</span>
+                        <span style={{ color: "#8E44AD", fontWeight: 600, fontSize: 14 }}>פתח PDF</span>
+                        <span style={{ fontSize: 12, color: "#B39DDB" }}>↗</span>
+                      </a>
+                    ) : (
+                      <img src={coupon.imageUrl} alt={coupon.title} style={{ width: "100%", height: 140, objectFit: "cover" }} />
+                    )
+                  )}
                   <div style={{ padding: "14px 16px" }}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
                       <p style={{ margin: 0, fontSize: 16, fontWeight: 600, color: "#2D3436", flex: 1 }}>🎟️ {coupon.title}</p>
