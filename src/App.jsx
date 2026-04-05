@@ -2,8 +2,8 @@ import { useState, useEffect, useRef } from "react";
 import { initializeApp } from "firebase/app";
 import { getFirestore, collection, addDoc, deleteDoc, doc, onSnapshot, query, orderBy } from "firebase/firestore";
 import { getAuth, signInAnonymously } from "firebase/auth";
+import { getStorage, ref, uploadBytes, getDownloadURL } from "firebase/storage";
 
-// Firebase configuration
 const firebaseConfig = {
   apiKey: "AIzaSyBRAaqDl5ywLm-wSOmvo-ucPxtVNdWjH7w",
   authDomain: "grocery-app-5fa03.firebaseapp.com",
@@ -17,26 +17,52 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 const auth = getAuth(app);
+const storage = getStorage(app);
+
+// ─── Constants ───────────────────────────────────────────────────────────────
 
 const PRIORITY_CONFIG = {
-  red: { label: "דחוף", color: "#E53935", bg: "#FFEBEE", icon: "🔴" },
-  yellow: { label: "חשוב", color: "#F9A825", bg: "#FFF8E1", icon: "🟡" },
-  green: { label: "עדיפות נמוכה", color: "#43A047", bg: "#E8F5E9", icon: "🟢" },
+  red:    { label: "דחוף",          color: "#E53935", bg: "#FFEBEE", icon: "🔴" },
+  yellow: { label: "חשוב",           color: "#F9A825", bg: "#FFF8E1", icon: "🟡" },
+  green:  { label: "עדיפות נמוכה",  color: "#43A047", bg: "#E8F5E9", icon: "🟢" },
 };
 
-// Distinct colors — deliberately avoids red/yellow/green (used for priority)
 const USER_COLORS = [
-  { color: "#2980B9", bg: "#EBF5FB" }, // blue
-  { color: "#8E44AD", bg: "#F5EEF8" }, // purple
-  { color: "#E67E22", bg: "#FEF9E7" }, // orange
-  { color: "#00897B", bg: "#E0F2F1" }, // teal
-  { color: "#D81B60", bg: "#FCE4EC" }, // pink
-  { color: "#3949AB", bg: "#E8EAF6" }, // indigo
-  { color: "#0097A7", bg: "#E0F7FA" }, // cyan
-  { color: "#E64A19", bg: "#FBE9E7" }, // deep orange
+  { color: "#2980B9", bg: "#EBF5FB" },
+  { color: "#8E44AD", bg: "#F5EEF8" },
+  { color: "#E67E22", bg: "#FEF9E7" },
+  { color: "#00897B", bg: "#E0F2F1" },
+  { color: "#D81B60", bg: "#FCE4EC" },
+  { color: "#3949AB", bg: "#E8EAF6" },
+  { color: "#0097A7", bg: "#E0F7FA" },
+  { color: "#E64A19", bg: "#FBE9E7" },
 ];
 
-function getUserColor(name) {
+const MODULES = [
+  { id: "shopping", icon: "🛒", label: "רשימת קניות",      desc: "ניהול קניות משותף",          color: "#2D3436", bg: "#F0EDED", available: true  },
+  { id: "coupons",  icon: "🎟️", label: "שוברים",           desc: "שמירת שוברים והטבות",        color: "#8E44AD", bg: "#F5EEF8", available: true  },
+  { id: "receipts", icon: "🧾", label: "קבלות",            desc: "ארגון קבלות ותשלומים",       color: "#2980B9", bg: "#EBF5FB", available: false },
+];
+
+// ─── Shared input style ───────────────────────────────────────────────────────
+
+const inputStyle = {
+  width: "100%",
+  padding: "12px 16px",
+  border: "2px solid #E8E5E0",
+  borderRadius: 12,
+  fontSize: 15,
+  fontFamily: "'Rubik', sans-serif",
+  outline: "none",
+  boxSizing: "border-box",
+  direction: "rtl",
+  transition: "border-color 0.2s",
+  background: "#fff",
+};
+
+// ─── Utilities ───────────────────────────────────────────────────────────────
+
+function getUserColor(name = "") {
   let hash = 0;
   for (let i = 0; i < name.length; i++) {
     hash = ((hash << 5) - hash) + name.charCodeAt(i);
@@ -47,128 +73,71 @@ function getUserColor(name) {
 
 function formatDate(iso) {
   const d = new Date(iso);
-  const day = String(d.getDate()).padStart(2, "0");
-  const month = String(d.getMonth() + 1).padStart(2, "0");
-  return `${day}/${month} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  return `${String(d.getDate()).padStart(2,"0")}/${String(d.getMonth()+1).padStart(2,"0")} ${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`;
 }
 
+function getExpiryStatus(dateStr) {
+  if (!dateStr) return null;
+  const now  = new Date();
+  const exp  = new Date(dateStr);
+  const days = Math.ceil((exp - now) / 86400000);
+  if (days < 0)  return { label: "פג תוקף",      color: "#E53935", bg: "#FFEBEE" };
+  if (days <= 7) return { label: `${days} ימים`,  color: "#F9A825", bg: "#FFF8E1" };
+  const d = exp;
+  return { label: `${String(d.getDate()).padStart(2,"0")}/${String(d.getMonth()+1).padStart(2,"0")}/${d.getFullYear()}`, color: "#43A047", bg: "#E8F5E9" };
+}
+
+// ─── SwipeItem ────────────────────────────────────────────────────────────────
+
 function SwipeItem({ children, onSwipe }) {
-  const ref = useRef(null);
-  const startX = useRef(0);
+  const startX  = useRef(0);
   const currentX = useRef(0);
-  const swiping = useRef(false);
-  const [offset, setOffset] = useState(0);
+  const swiping  = useRef(false);
+  const [offset, setOffset]   = useState(0);
   const [removing, setRemoving] = useState(false);
 
-  const onStart = (e) => {
-    const x = e.touches ? e.touches[0].clientX : e.clientX;
-    startX.current = x;
-    swiping.current = true;
-  };
-
-  const onMove = (e) => {
+  const onStart = (e) => { startX.current = e.touches ? e.touches[0].clientX : e.clientX; swiping.current = true; };
+  const onMove  = (e) => {
     if (!swiping.current) return;
-    const x = e.touches ? e.touches[0].clientX : e.clientX;
-    const diff = x - startX.current;
-    if (diff < 0) {
-      currentX.current = diff;
-      setOffset(diff);
-    }
+    const diff = (e.touches ? e.touches[0].clientX : e.clientX) - startX.current;
+    if (diff < 0) { currentX.current = diff; setOffset(diff); }
   };
-
   const onEnd = () => {
     swiping.current = false;
-    if (currentX.current < -100) {
-      setRemoving(true);
-      setOffset(-500);
-      setTimeout(() => onSwipe(), 300);
-    } else {
-      currentX.current = 0;
-      setOffset(0);
-    }
+    if (currentX.current < -100) { setRemoving(true); setOffset(-500); setTimeout(onSwipe, 300); }
+    else { currentX.current = 0; setOffset(0); }
   };
 
   return (
     <div
-      ref={ref}
-      onTouchStart={onStart}
-      onTouchMove={onMove}
-      onTouchEnd={onEnd}
-      onMouseDown={onStart}
-      onMouseMove={onMove}
-      onMouseUp={onEnd}
-      onMouseLeave={() => {
-        if (swiping.current) onEnd();
-      }}
-      style={{
-        transform: `translateX(${offset}px)`,
-        transition: swiping.current ? "none" : "transform 0.3s ease",
-        opacity: removing ? 0 : 1,
-        position: "relative",
-        cursor: "grab",
-        userSelect: "none",
-      }}
+      onTouchStart={onStart} onTouchMove={onMove} onTouchEnd={onEnd}
+      onMouseDown={onStart}  onMouseMove={onMove} onMouseUp={onEnd}
+      onMouseLeave={() => { if (swiping.current) onEnd(); }}
+      style={{ transform: `translateX(${offset}px)`, transition: swiping.current ? "none" : "transform 0.3s ease", opacity: removing ? 0 : 1, cursor: "grab", userSelect: "none" }}
     >
       {children}
     </div>
   );
 }
 
-// Name setup screen
+// ─── NameSetup ────────────────────────────────────────────────────────────────
+
 function NameSetup({ onSave }) {
   const [name, setName] = useState("");
   return (
-    <div dir="rtl" style={{
-      fontFamily: "'Rubik', sans-serif",
-      maxWidth: 480,
-      margin: "0 auto",
-      minHeight: "100vh",
-      background: "linear-gradient(165deg, #FAFAFA 0%, #F0EDE8 100%)",
-      display: "flex",
-      flexDirection: "column",
-      alignItems: "center",
-      justifyContent: "center",
-      padding: 24,
-    }}>
-      <div style={{ fontSize: 64, marginBottom: 20 }}>🛒</div>
-      <h1 style={{ fontSize: 24, fontWeight: 700, color: "#2D3436", marginBottom: 8 }}>רשימת קניות</h1>
+    <div dir="rtl" style={{ fontFamily: "'Rubik', sans-serif", maxWidth: 480, margin: "0 auto", minHeight: "100vh", background: "linear-gradient(165deg, #FAFAFA 0%, #F0EDE8 100%)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 24 }}>
+      <div style={{ fontSize: 64, marginBottom: 20 }}>🏠</div>
+      <h1 style={{ fontSize: 24, fontWeight: 700, color: "#2D3436", marginBottom: 8 }}>ברוך הבא</h1>
       <p style={{ fontSize: 15, color: "#888", marginBottom: 32, fontWeight: 300 }}>איך קוראים לך?</p>
       <input
-        value={name}
-        onChange={(e) => setName(e.target.value)}
+        value={name} onChange={(e) => setName(e.target.value)}
         onKeyDown={(e) => e.key === "Enter" && name.trim() && onSave(name.trim())}
-        placeholder="הכנס את השם שלך"
-        autoFocus
-        style={{
-          width: "100%",
-          maxWidth: 280,
-          padding: "14px 16px",
-          border: "2px solid #E8E5E0",
-          borderRadius: 14,
-          fontSize: 18,
-          fontFamily: "inherit",
-          outline: "none",
-          textAlign: "center",
-          direction: "rtl",
-          marginBottom: 16,
-        }}
+        placeholder="הכנס את השם שלך" autoFocus
+        style={{ ...inputStyle, maxWidth: 280, fontSize: 18, textAlign: "center", marginBottom: 16 }}
       />
       <button
-        onClick={() => name.trim() && onSave(name.trim())}
-        disabled={!name.trim()}
-        style={{
-          width: "100%",
-          maxWidth: 280,
-          border: "none",
-          background: name.trim() ? "linear-gradient(135deg, #2D3436, #636E72)" : "#ccc",
-          color: "#fff",
-          borderRadius: 14,
-          padding: "14px",
-          fontSize: 16,
-          fontWeight: 600,
-          fontFamily: "inherit",
-          cursor: name.trim() ? "pointer" : "default",
-        }}
+        onClick={() => name.trim() && onSave(name.trim())} disabled={!name.trim()}
+        style={{ width: "100%", maxWidth: 280, border: "none", background: name.trim() ? "linear-gradient(135deg, #2D3436, #636E72)" : "#ccc", color: "#fff", borderRadius: 14, padding: "14px", fontSize: 16, fontWeight: 600, fontFamily: "inherit", cursor: name.trim() ? "pointer" : "default" }}
       >
         בואו נתחיל ✓
       </button>
@@ -176,336 +145,139 @@ function NameSetup({ onSave }) {
   );
 }
 
-export default function GroceryApp() {
-  const [userName, setUserName] = useState(() => {
-    return localStorage.getItem("grocery-username") || "";
-  });
-  const [items, setItems] = useState([]);
-  const [history, setHistory] = useState(() => {
-    try {
-      const raw = localStorage.getItem("grocery-history");
-      return raw ? JSON.parse(raw) : [];
-    } catch { return []; }
-  });
+// ─── HomeScreen ───────────────────────────────────────────────────────────────
+
+function HomeScreen({ userName, onNavigate }) {
+  return (
+    <div dir="rtl" style={{ fontFamily: "'Rubik', sans-serif", maxWidth: 480, margin: "0 auto", minHeight: "100vh", background: "linear-gradient(165deg, #FAFAFA 0%, #F0EDE8 100%)" }}>
+      <div style={{ background: "linear-gradient(135deg, #2D3436 0%, #636E72 100%)", padding: "36px 24px 28px", borderRadius: "0 0 32px 32px", boxShadow: "0 8px 32px rgba(0,0,0,0.12)", marginBottom: 24 }}>
+        <p style={{ margin: "0 0 6px", fontSize: 14, color: "rgba(255,255,255,0.55)", fontWeight: 300 }}>👋 שלום, {userName}</p>
+        <h1 style={{ margin: 0, fontSize: 28, fontWeight: 700, color: "#fff" }}>מה נפתח?</h1>
+      </div>
+
+      <div style={{ padding: "0 16px 32px", display: "flex", flexDirection: "column", gap: 12 }}>
+        {MODULES.map((mod) => (
+          <button
+            key={mod.id}
+            onClick={() => mod.available && onNavigate(mod.id)}
+            style={{ display: "flex", alignItems: "center", gap: 16, background: "#fff", border: "none", borderRadius: 20, padding: "20px", textAlign: "right", cursor: mod.available ? "pointer" : "default", boxShadow: "0 2px 12px rgba(0,0,0,0.06)", opacity: mod.available ? 1 : 0.5, transition: "transform 0.15s, box-shadow 0.15s", fontFamily: "inherit", width: "100%" }}
+            onMouseEnter={(e) => { if (mod.available) { e.currentTarget.style.transform = "translateY(-2px)"; e.currentTarget.style.boxShadow = "0 6px 20px rgba(0,0,0,0.1)"; } }}
+            onMouseLeave={(e) => { e.currentTarget.style.transform = "translateY(0)"; e.currentTarget.style.boxShadow = "0 2px 12px rgba(0,0,0,0.06)"; }}
+          >
+            <div style={{ width: 58, height: 58, borderRadius: 16, background: mod.bg, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 28, flexShrink: 0 }}>
+              {mod.icon}
+            </div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 17, fontWeight: 600, color: "#2D3436", marginBottom: 3 }}>{mod.label}</div>
+              <div style={{ fontSize: 13, color: "#AAA", fontWeight: 300 }}>{mod.available ? mod.desc : "בקרוב..."}</div>
+            </div>
+            {mod.available && <div style={{ color: "#CCC", fontSize: 20, marginLeft: 4 }}>‹</div>}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ─── ShoppingScreen ───────────────────────────────────────────────────────────
+
+function ShoppingScreen({ userName, onBack }) {
+  const [items, setItems]   = useState([]);
+  const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
   const [inputValue, setInputValue] = useState("");
-  const [priority, setPriority] = useState("yellow");
+  const [priority, setPriority]     = useState("yellow");
   const [suggestions, setSuggestions] = useState([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [authReady, setAuthReady] = useState(false);
+  const [history, setHistory] = useState(() => { try { return JSON.parse(localStorage.getItem("grocery-history")) || []; } catch { return []; } });
   const inputRef = useRef(null);
 
-  // Sign in anonymously — transparent to the user.
-  // authStateReady() resolves from cache instantly for returning users.
   useEffect(() => {
-    auth.authStateReady()
-      .then(() => {
-        if (!auth.currentUser) return signInAnonymously(auth);
-      })
-      .then(() => setAuthReady(true))
-      .catch((e) => console.error("Auth error:", e));
+    const q = query(collection(db, "items"), orderBy("date", "desc"));
+    const unsub = onSnapshot(q, (snap) => { setItems(snap.docs.map((d) => ({ id: d.id, ...d.data() }))); setLoading(false); });
+    return () => unsub();
   }, []);
 
-  const saveName = (name) => {
-    localStorage.setItem("grocery-username", name);
-    setUserName(name);
-  };
-
-  // Listen to Firestore in real-time — only after auth is ready
-  useEffect(() => {
-    if (!authReady) return;
-    const q = query(collection(db, "items"), orderBy("date", "desc"));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const newItems = snapshot.docs.map((doc) => ({
-        id: doc.id,
-        ...doc.data(),
-      }));
-      setItems(newItems);
-      setLoading(false);
-    });
-    return () => unsubscribe();
-  }, [authReady]);
-
-  // Save history to localStorage
-  useEffect(() => {
-    localStorage.setItem("grocery-history", JSON.stringify(history));
-  }, [history]);
+  useEffect(() => { localStorage.setItem("grocery-history", JSON.stringify(history)); }, [history]);
+  useEffect(() => { if (showAdd && inputRef.current) inputRef.current.focus(); }, [showAdd]);
 
   const addItem = async () => {
     const name = inputValue.trim();
     if (!name) return;
     try {
-      await addDoc(collection(db, "items"), {
-        name,
-        priority,
-        addedBy: userName,
-        date: new Date().toISOString(),
-      });
-      if (!history.includes(name)) {
-        setHistory((prev) => [...prev, name]);
-      }
-    } catch (e) {
-      console.error("Error adding item:", e);
-    }
-    setInputValue("");
-    setPriority("yellow");
-    setShowAdd(false);
-    setShowSuggestions(false);
+      await addDoc(collection(db, "items"), { name, priority, addedBy: userName, date: new Date().toISOString() });
+      if (!history.includes(name)) setHistory((p) => [...p, name]);
+    } catch (e) { console.error("Error adding item:", e); }
+    setInputValue(""); setPriority("yellow"); setShowAdd(false); setShowSuggestions(false);
   };
 
-  const removeItem = async (id) => {
-    try {
-      await deleteDoc(doc(db, "items", id));
-    } catch (e) {
-      console.error("Error removing item:", e);
-    }
-  };
+  const removeItem = async (id) => { try { await deleteDoc(doc(db, "items", id)); } catch (e) { console.error(e); } };
 
   const onInput = (val) => {
     setInputValue(val);
-    if (val.trim().length > 0) {
-      const filtered = history.filter(
-        (h) => h.includes(val.trim()) && h !== val.trim()
-      );
-      setSuggestions(filtered.slice(0, 5));
-      setShowSuggestions(filtered.length > 0);
-    } else {
-      setShowSuggestions(false);
-    }
+    if (val.trim()) { const f = history.filter((h) => h.includes(val.trim()) && h !== val.trim()); setSuggestions(f.slice(0,5)); setShowSuggestions(f.length > 0); }
+    else setShowSuggestions(false);
   };
 
-  const selectSuggestion = (s) => {
-    setInputValue(s);
-    setShowSuggestions(false);
-  };
+  const sorted = [...items].sort((a, b) => ({ red:0, yellow:1, green:2 }[a.priority] - { red:0, yellow:1, green:2 }[b.priority]));
 
-  useEffect(() => {
-    if (showAdd && inputRef.current) inputRef.current.focus();
-  }, [showAdd]);
-
-  // Show name setup if no name saved
-  if (!userName) {
-    return <NameSetup onSave={saveName} />;
-  }
-
-  const sorted = [...items].sort((a, b) => {
-    const order = { red: 0, yellow: 1, green: 2 };
-    return order[a.priority] - order[b.priority];
-  });
-
-  if (loading)
-    return (
-      <div style={{ display: "flex", justifyContent: "center", alignItems: "center", height: "100vh", fontFamily: "'Rubik', sans-serif" }}>
-        <p style={{ color: "#888", fontSize: 18 }}>טוען...</p>
-      </div>
-    );
+  if (loading) return <Loader />;
 
   return (
-    <div
-      dir="rtl"
-      style={{
-        fontFamily: "'Rubik', sans-serif",
-        maxWidth: 480,
-        margin: "0 auto",
-        minHeight: "100vh",
-        background: "linear-gradient(165deg, #FAFAFA 0%, #F0EDE8 100%)",
-        position: "relative",
-        overflow: "hidden",
-      }}
-    >
-
-      {/* Header */}
-      <div
-        style={{
-          background: "linear-gradient(135deg, #2D3436 0%, #636E72 100%)",
-          padding: "28px 24px 20px",
-          borderRadius: "0 0 28px 28px",
-          boxShadow: "0 8px 32px rgba(0,0,0,0.12)",
-        }}
-      >
+    <div dir="rtl" style={{ fontFamily: "'Rubik', sans-serif", maxWidth: 480, margin: "0 auto", minHeight: "100vh", background: "linear-gradient(165deg, #FAFAFA 0%, #F0EDE8 100%)", position: "relative" }}>
+      <div style={{ background: "linear-gradient(135deg, #2D3436 0%, #636E72 100%)", padding: "28px 24px 20px", borderRadius: "0 0 28px 28px", boxShadow: "0 8px 32px rgba(0,0,0,0.12)" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div>
-            <h1 style={{ margin: 0, fontSize: 26, fontWeight: 700, color: "#fff", letterSpacing: -0.5 }}>
-              🛒 רשימת קניות
-            </h1>
-            <p style={{ margin: "4px 0 0", fontSize: 13, color: "rgba(255,255,255,0.6)", fontWeight: 300 }}>
-              {items.length} פריטים ברשימה
-            </p>
+            <h1 style={{ margin: 0, fontSize: 26, fontWeight: 700, color: "#fff" }}>🛒 רשימת קניות</h1>
+            <p style={{ margin: "4px 0 0", fontSize: 13, color: "rgba(255,255,255,0.6)", fontWeight: 300 }}>{items.length} פריטים ברשימה</p>
           </div>
-          <div style={{
-            background: "rgba(255,255,255,0.12)",
-            borderRadius: 10,
-            padding: "8px 14px",
-            fontSize: 13,
-            color: "rgba(255,255,255,0.8)",
-            fontWeight: 400,
-          }}>
-            👋 {userName}
-          </div>
+          <BackButton onBack={onBack} />
         </div>
       </div>
 
-      {/* Content */}
       <div style={{ padding: "16px 16px 100px" }}>
-        {/* Add Form */}
         {showAdd && (
-          <div
-            style={{
-              background: "#fff",
-              borderRadius: 20,
-              padding: 20,
-              marginBottom: 16,
-              boxShadow: "0 4px 20px rgba(0,0,0,0.06)",
-              animation: "slideDown 0.3s ease",
-            }}
-          >
+          <div style={{ background: "#fff", borderRadius: 20, padding: 20, marginBottom: 16, boxShadow: "0 4px 20px rgba(0,0,0,0.06)", animation: "slideDown 0.3s ease" }}>
             <div style={{ position: "relative" }}>
-              <input
-                ref={inputRef}
-                value={inputValue}
-                onChange={(e) => onInput(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && addItem()}
-                placeholder="מה צריך לקנות?"
-                style={{
-                  width: "100%",
-                  padding: "14px 16px",
-                  border: "2px solid #E8E5E0",
-                  borderRadius: 14,
-                  fontSize: 16,
-                  fontFamily: "inherit",
-                  outline: "none",
-                  boxSizing: "border-box",
-                  transition: "border-color 0.2s",
-                  direction: "rtl",
-                }}
-                onFocus={(e) => (e.target.style.borderColor = "#636E72")}
-                onBlur={(e) => (e.target.style.borderColor = "#E8E5E0")}
-              />
+              <input ref={inputRef} value={inputValue} onChange={(e) => onInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addItem()} placeholder="מה צריך לקנות?"
+                style={inputStyle} onFocus={(e) => (e.target.style.borderColor = "#636E72")} onBlur={(e) => (e.target.style.borderColor = "#E8E5E0")} />
               {showSuggestions && (
-                <div
-                  style={{
-                    position: "absolute",
-                    top: "100%",
-                    right: 0,
-                    left: 0,
-                    background: "#fff",
-                    borderRadius: 12,
-                    boxShadow: "0 8px 24px rgba(0,0,0,0.1)",
-                    zIndex: 10,
-                    marginTop: 4,
-                    overflow: "hidden",
-                  }}
-                >
+                <div style={{ position: "absolute", top: "100%", right: 0, left: 0, background: "#fff", borderRadius: 12, boxShadow: "0 8px 24px rgba(0,0,0,0.1)", zIndex: 10, marginTop: 4, overflow: "hidden" }}>
                   {suggestions.map((s, i) => (
-                    <div
-                      key={i}
-                      onClick={() => selectSuggestion(s)}
-                      style={{
-                        padding: "12px 16px",
-                        cursor: "pointer",
-                        fontSize: 15,
-                        borderBottom: i < suggestions.length - 1 ? "1px solid #f0f0f0" : "none",
-                        transition: "background 0.15s",
-                      }}
-                      onMouseEnter={(e) => (e.target.style.background = "#F5F3F0")}
-                      onMouseLeave={(e) => (e.target.style.background = "transparent")}
-                    >
-                      🔄 {s}
-                    </div>
+                    <div key={i} onClick={() => { setInputValue(s); setShowSuggestions(false); }} style={{ padding: "12px 16px", cursor: "pointer", fontSize: 15, borderBottom: i < suggestions.length-1 ? "1px solid #f0f0f0" : "none" }}>🔄 {s}</div>
                   ))}
                 </div>
               )}
             </div>
-
-            {/* Priority */}
             <div style={{ marginTop: 14 }}>
-              <p style={{ margin: "0 0 8px", fontSize: 13, fontWeight: 500, color: "#888" }}>
-                רמת דחיפות:
-              </p>
+              <p style={{ margin: "0 0 8px", fontSize: 13, fontWeight: 500, color: "#888" }}>רמת דחיפות:</p>
               <div style={{ display: "flex", gap: 8 }}>
                 {Object.entries(PRIORITY_CONFIG).map(([key, cfg]) => (
-                  <button
-                    key={key}
-                    onClick={() => setPriority(key)}
-                    style={{
-                      flex: 1,
-                      border: priority === key ? `2px solid ${cfg.color}` : "2px solid #E8E5E0",
-                      background: priority === key ? cfg.bg : "#FAFAFA",
-                      borderRadius: 12,
-                      padding: "10px 8px",
-                      cursor: "pointer",
-                      fontSize: 13,
-                      fontFamily: "inherit",
-                      fontWeight: priority === key ? 600 : 400,
-                      color: priority === key ? cfg.color : "#999",
-                      transition: "all 0.2s",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      gap: 4,
-                    }}
-                  >
+                  <button key={key} onClick={() => setPriority(key)}
+                    style={{ flex: 1, border: priority===key ? `2px solid ${cfg.color}` : "2px solid #E8E5E0", background: priority===key ? cfg.bg : "#FAFAFA", borderRadius: 12, padding: "10px 8px", cursor: "pointer", fontSize: 13, fontFamily: "inherit", fontWeight: priority===key ? 600 : 400, color: priority===key ? cfg.color : "#999", display: "flex", alignItems: "center", justifyContent: "center", gap: 4 }}>
                     {cfg.icon} {cfg.label}
                   </button>
                 ))}
               </div>
             </div>
-
             <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
-              <button
-                onClick={addItem}
-                disabled={!inputValue.trim()}
-                style={{
-                  flex: 1,
-                  border: "none",
-                  background: inputValue.trim() ? "linear-gradient(135deg, #2D3436, #636E72)" : "#ccc",
-                  color: "#fff",
-                  borderRadius: 12,
-                  padding: "14px",
-                  fontSize: 15,
-                  fontWeight: 600,
-                  fontFamily: "inherit",
-                  cursor: inputValue.trim() ? "pointer" : "default",
-                  transition: "all 0.2s",
-                }}
-              >
+              <button onClick={addItem} disabled={!inputValue.trim()}
+                style={{ flex: 1, border: "none", background: inputValue.trim() ? "linear-gradient(135deg, #2D3436, #636E72)" : "#ccc", color: "#fff", borderRadius: 12, padding: "14px", fontSize: 15, fontWeight: 600, fontFamily: "inherit", cursor: inputValue.trim() ? "pointer" : "default" }}>
                 הוסף לרשימה ✓
               </button>
-              <button
-                onClick={() => { setShowAdd(false); setInputValue(""); setShowSuggestions(false); }}
-                style={{
-                  border: "2px solid #E8E5E0",
-                  background: "#fff",
-                  color: "#999",
-                  borderRadius: 12,
-                  padding: "14px 20px",
-                  fontSize: 15,
-                  fontFamily: "inherit",
-                  cursor: "pointer",
-                }}
-              >
-                ✕
-              </button>
+              <button onClick={() => { setShowAdd(false); setInputValue(""); setShowSuggestions(false); }}
+                style={{ border: "2px solid #E8E5E0", background: "#fff", color: "#999", borderRadius: 12, padding: "14px 20px", fontSize: 15, fontFamily: "inherit", cursor: "pointer" }}>✕</button>
             </div>
           </div>
         )}
 
-        {/* Swipe hint */}
-        {items.length > 0 && (
-          <p style={{ textAlign: "center", fontSize: 12, color: "#BBB", margin: "8px 0 12px", fontWeight: 300 }}>
-            ← החלק שמאלה למחיקה
-          </p>
-        )}
+        {items.length > 0 && <p style={{ textAlign: "center", fontSize: 12, color: "#BBB", margin: "8px 0 12px", fontWeight: 300 }}>← החלק שמאלה למחיקה</p>}
 
-        {/* List */}
         {sorted.length === 0 && !showAdd && (
           <div style={{ textAlign: "center", padding: "60px 20px" }}>
             <div style={{ fontSize: 56, marginBottom: 16 }}>🛒</div>
             <p style={{ fontSize: 18, color: "#999", fontWeight: 300 }}>הרשימה ריקה</p>
-            <p style={{ fontSize: 14, color: "#CCC", fontWeight: 300, marginTop: 4 }}>
-              לחצו על + כדי להוסיף פריטים
-            </p>
+            <p style={{ fontSize: 14, color: "#CCC", fontWeight: 300, marginTop: 4 }}>לחצו על + כדי להוסיף פריטים</p>
           </div>
         )}
 
@@ -514,77 +286,200 @@ export default function GroceryApp() {
             const cfg = PRIORITY_CONFIG[item.priority];
             return (
               <div key={item.id} style={{ position: "relative", overflow: "hidden", borderRadius: 16 }}>
-                <div
-                  style={{
-                    position: "absolute",
-                    inset: 0,
-                    background: "#E53935",
-                    borderRadius: 16,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "flex-start",
-                    paddingLeft: 24,
-                    color: "#fff",
-                    fontSize: 14,
-                    fontWeight: 600,
-                    fontFamily: "inherit",
-                  }}
-                >
-                  🗑️ מחיקה
-                </div>
+                <DeleteHint />
                 <SwipeItem onSwipe={() => removeItem(item.id)}>
-                  <div
-                    style={{
-                      background: "#fff",
-                      borderRadius: 16,
-                      padding: "16px 18px",
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 14,
-                      boxShadow: "0 2px 8px rgba(0,0,0,0.04)",
-                      borderRight: `4px solid ${cfg.color}`,
-                    }}
-                  >
-                    <div
-                      style={{
-                        width: 40,
-                        height: 40,
-                        borderRadius: 12,
-                        background: cfg.bg,
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        fontSize: 18,
-                        flexShrink: 0,
-                      }}
-                    >
-                      {cfg.icon}
-                    </div>
+                  <div style={{ background: "#fff", borderRadius: 16, padding: "16px 18px", display: "flex", alignItems: "center", gap: 14, boxShadow: "0 2px 8px rgba(0,0,0,0.04)", borderRight: `4px solid ${cfg.color}` }}>
+                    <div style={{ width: 40, height: 40, borderRadius: 12, background: cfg.bg, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, flexShrink: 0 }}>{cfg.icon}</div>
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <p style={{ margin: 0, fontSize: 16, fontWeight: 500, color: "#2D3436" }}>
-                        {item.name}
-                      </p>
+                      <p style={{ margin: 0, fontSize: 16, fontWeight: 500, color: "#2D3436" }}>{item.name}</p>
                       <div style={{ display: "flex", gap: 12, marginTop: 4, alignItems: "center" }}>
-                        <span style={{ fontSize: 12, color: "#AAA", fontWeight: 300 }}>
-                          📅 {formatDate(item.date)}
-                        </span>
-                        <span style={{ fontSize: 12, color: getUserColor(item.addedBy).color, fontWeight: 500 }}>
-                          👤 {item.addedBy}
-                        </span>
+                        <span style={{ fontSize: 12, color: "#AAA", fontWeight: 300 }}>📅 {formatDate(item.date)}</span>
+                        <span style={{ fontSize: 12, color: getUserColor(item.addedBy).color, fontWeight: 500 }}>👤 {item.addedBy}</span>
                       </div>
                     </div>
-                    <div
-                      style={{
-                        fontSize: 11,
-                        fontWeight: 600,
-                        color: cfg.color,
-                        background: cfg.bg,
-                        padding: "4px 10px",
-                        borderRadius: 8,
-                        flexShrink: 0,
-                      }}
-                    >
-                      {cfg.label}
+                    <div style={{ fontSize: 11, fontWeight: 600, color: cfg.color, background: cfg.bg, padding: "4px 10px", borderRadius: 8, flexShrink: 0 }}>{cfg.label}</div>
+                  </div>
+                </SwipeItem>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {!showAdd && <FAB onClick={() => setShowAdd(true)} color="linear-gradient(135deg, #2D3436, #636E72)" shadow="rgba(45,52,54,0.35)" />}
+      <GlobalStyles />
+    </div>
+  );
+}
+
+// ─── CouponsScreen ────────────────────────────────────────────────────────────
+
+function CouponsScreen({ userName, onBack }) {
+  const [coupons, setCoupons]   = useState([]);
+  const [loading, setLoading]   = useState(true);
+  const [showAdd, setShowAdd]   = useState(false);
+  const [title, setTitle]       = useState("");
+  const [code, setCode]         = useState("");
+  const [url, setUrl]           = useState("");
+  const [expiryDate, setExpiryDate] = useState("");
+  const [file, setFile]         = useState(null);
+  const [filePreview, setFilePreview] = useState(null);
+  const [uploading, setUploading] = useState(false);
+  const [copiedId, setCopiedId] = useState(null);
+  const fileInputRef = useRef(null);
+
+  useEffect(() => {
+    const q = query(collection(db, "coupons"), orderBy("date", "desc"));
+    const unsub = onSnapshot(q, (snap) => { setCoupons(snap.docs.map((d) => ({ id: d.id, ...d.data() }))); setLoading(false); });
+    return () => unsub();
+  }, []);
+
+  const handleFileChange = (e) => {
+    const f = e.target.files[0];
+    if (!f) return;
+    setFile(f);
+    if (f.type.startsWith("image/")) { const r = new FileReader(); r.onload = (ev) => setFilePreview(ev.target.result); r.readAsDataURL(f); }
+    else setFilePreview("pdf");
+  };
+
+  const resetForm = () => { setTitle(""); setCode(""); setUrl(""); setExpiryDate(""); setFile(null); setFilePreview(null); setShowAdd(false); };
+
+  const addCoupon = async () => {
+    if (!title.trim()) return;
+    setUploading(true);
+    try {
+      let imageUrl = "", imagePath = "";
+      if (file) {
+        imagePath = `coupons/${Date.now()}_${file.name}`;
+        const storageRef = ref(storage, imagePath);
+        await uploadBytes(storageRef, file);
+        imageUrl = await getDownloadURL(storageRef);
+      }
+      await addDoc(collection(db, "coupons"), { title: title.trim(), code: code.trim(), url: url.trim(), expiryDate, imageUrl, imagePath, addedBy: userName, date: new Date().toISOString() });
+      resetForm();
+    } catch (e) { console.error("Error adding coupon:", e); }
+    setUploading(false);
+  };
+
+  const removeCoupon = async (id) => { try { await deleteDoc(doc(db, "coupons", id)); } catch (e) { console.error(e); } };
+
+  const copyCode = (id, c) => { navigator.clipboard.writeText(c).then(() => { setCopiedId(id); setTimeout(() => setCopiedId(null), 2000); }); };
+
+  const sorted = [...coupons].sort((a, b) => {
+    const rank = (c) => { if (!c.expiryDate) return 1; const d = new Date(c.expiryDate)-new Date(); return d < 0 ? 3 : d < 604800000 ? 2 : 1; };
+    return rank(a) - rank(b);
+  });
+
+  if (loading) return <Loader />;
+
+  return (
+    <div dir="rtl" style={{ fontFamily: "'Rubik', sans-serif", maxWidth: 480, margin: "0 auto", minHeight: "100vh", background: "linear-gradient(165deg, #FAFAFA 0%, #F0EDE8 100%)" }}>
+      <div style={{ background: "linear-gradient(135deg, #8E44AD 0%, #6C3483 100%)", padding: "28px 24px 20px", borderRadius: "0 0 28px 28px", boxShadow: "0 8px 32px rgba(142,68,173,0.25)" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div>
+            <h1 style={{ margin: 0, fontSize: 26, fontWeight: 700, color: "#fff" }}>🎟️ שוברים</h1>
+            <p style={{ margin: "4px 0 0", fontSize: 13, color: "rgba(255,255,255,0.6)", fontWeight: 300 }}>{coupons.length} שוברים שמורים</p>
+          </div>
+          <BackButton onBack={onBack} light />
+        </div>
+      </div>
+
+      <div style={{ padding: "16px 16px 100px" }}>
+        {showAdd && (
+          <div style={{ background: "#fff", borderRadius: 20, padding: 20, marginBottom: 16, boxShadow: "0 4px 20px rgba(0,0,0,0.08)", animation: "slideDown 0.3s ease" }}>
+            <h3 style={{ margin: "0 0 16px", fontSize: 16, fontWeight: 600, color: "#2D3436" }}>שובר חדש</h3>
+
+            <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="שם החנות / תיאור *"
+              style={inputStyle} onFocus={(e) => (e.target.style.borderColor = "#8E44AD")} onBlur={(e) => (e.target.style.borderColor = "#E8E5E0")} />
+
+            <input value={code} onChange={(e) => setCode(e.target.value)} placeholder="קוד השובר (אופציונלי)"
+              style={{ ...inputStyle, marginTop: 10, letterSpacing: 1 }} onFocus={(e) => (e.target.style.borderColor = "#8E44AD")} onBlur={(e) => (e.target.style.borderColor = "#E8E5E0")} />
+
+            <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="קישור לשובר (אופציונלי)" type="url" dir="ltr"
+              style={{ ...inputStyle, marginTop: 10 }} onFocus={(e) => (e.target.style.borderColor = "#8E44AD")} onBlur={(e) => (e.target.style.borderColor = "#E8E5E0")} />
+
+            <div style={{ marginTop: 10 }}>
+              <p style={{ margin: "0 0 6px", fontSize: 13, color: "#888" }}>תאריך תפוגה (אופציונלי)</p>
+              <input value={expiryDate} onChange={(e) => setExpiryDate(e.target.value)} type="date"
+                style={{ ...inputStyle, color: expiryDate ? "#2D3436" : "#CCC" }} onFocus={(e) => (e.target.style.borderColor = "#8E44AD")} onBlur={(e) => (e.target.style.borderColor = "#E8E5E0")} />
+            </div>
+
+            <div style={{ marginTop: 10 }}>
+              <input ref={fileInputRef} type="file" accept="image/*,application/pdf" onChange={handleFileChange} style={{ display: "none" }} />
+              {filePreview ? (
+                <div style={{ position: "relative" }}>
+                  {filePreview === "pdf"
+                    ? <div style={{ background: "#F5EEF8", borderRadius: 12, padding: 16, textAlign: "center", color: "#8E44AD", fontSize: 14 }}>📄 {file.name}</div>
+                    : <img src={filePreview} alt="preview" style={{ width: "100%", borderRadius: 12, maxHeight: 160, objectFit: "cover" }} />
+                  }
+                  <button onClick={() => { setFile(null); setFilePreview(null); }}
+                    style={{ position: "absolute", top: 8, left: 8, background: "rgba(0,0,0,0.5)", color: "#fff", border: "none", borderRadius: "50%", width: 28, height: 28, cursor: "pointer", fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
+                </div>
+              ) : (
+                <button onClick={() => fileInputRef.current.click()}
+                  style={{ width: "100%", border: "2px dashed #E8E5E0", background: "#FAFAFA", borderRadius: 12, padding: 16, cursor: "pointer", fontSize: 14, color: "#AAA", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+                  📎 צרף תמונה או PDF (אופציונלי)
+                </button>
+              )}
+            </div>
+
+            <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
+              <button onClick={addCoupon} disabled={!title.trim() || uploading}
+                style={{ flex: 1, border: "none", background: title.trim() && !uploading ? "linear-gradient(135deg, #8E44AD, #6C3483)" : "#ccc", color: "#fff", borderRadius: 12, padding: "14px", fontSize: 15, fontWeight: 600, fontFamily: "inherit", cursor: title.trim() && !uploading ? "pointer" : "default" }}>
+                {uploading ? "מעלה..." : "שמור שובר ✓"}
+              </button>
+              <button onClick={resetForm}
+                style={{ border: "2px solid #E8E5E0", background: "#fff", color: "#999", borderRadius: 12, padding: "14px 20px", fontSize: 15, fontFamily: "inherit", cursor: "pointer" }}>✕</button>
+            </div>
+          </div>
+        )}
+
+        {sorted.length === 0 && !showAdd && (
+          <div style={{ textAlign: "center", padding: "60px 20px" }}>
+            <div style={{ fontSize: 56, marginBottom: 16 }}>🎟️</div>
+            <p style={{ fontSize: 18, color: "#999", fontWeight: 300 }}>אין שוברים שמורים</p>
+            <p style={{ fontSize: 14, color: "#CCC", fontWeight: 300, marginTop: 4 }}>לחצו על + כדי להוסיף שובר</p>
+          </div>
+        )}
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {sorted.map((coupon) => {
+            const expiry    = getExpiryStatus(coupon.expiryDate);
+            const uc        = getUserColor(coupon.addedBy);
+            const isExpired = expiry && new Date(coupon.expiryDate) < new Date();
+            return (
+              <div key={coupon.id} style={{ position: "relative", overflow: "hidden", borderRadius: 18 }}>
+                <DeleteHint />
+                <SwipeItem onSwipe={() => removeCoupon(coupon.id)}>
+                  <div style={{ background: "#fff", borderRadius: 18, overflow: "hidden", boxShadow: "0 2px 12px rgba(0,0,0,0.06)", opacity: isExpired ? 0.6 : 1 }}>
+                    {coupon.imageUrl && <img src={coupon.imageUrl} alt={coupon.title} style={{ width: "100%", height: 140, objectFit: "cover" }} />}
+                    <div style={{ padding: "14px 16px" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+                        <p style={{ margin: 0, fontSize: 16, fontWeight: 600, color: "#2D3436", flex: 1 }}>🎟️ {coupon.title}</p>
+                        {expiry && <span style={{ fontSize: 11, fontWeight: 600, color: expiry.color, background: expiry.bg, padding: "3px 8px", borderRadius: 8, flexShrink: 0 }}>⏱ {expiry.label}</span>}
+                      </div>
+
+                      {coupon.code && (
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10, background: "#F5EEF8", borderRadius: 10, padding: "8px 12px" }}>
+                          <span style={{ flex: 1, fontSize: 15, fontWeight: 700, color: "#8E44AD", letterSpacing: 1, direction: "ltr" }}>{coupon.code}</span>
+                          <button onClick={() => copyCode(coupon.id, coupon.code)}
+                            style={{ background: copiedId===coupon.id ? "#8E44AD" : "transparent", border: "none", borderRadius: 6, padding: "4px 8px", fontSize: 12, color: copiedId===coupon.id ? "#fff" : "#8E44AD", cursor: "pointer", fontFamily: "inherit", fontWeight: 500, transition: "all 0.2s" }}>
+                            {copiedId===coupon.id ? "✓ הועתק" : "העתק"}
+                          </button>
+                        </div>
+                      )}
+
+                      {coupon.url && (
+                        <a href={coupon.url} target="_blank" rel="noopener noreferrer"
+                          style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 8, fontSize: 13, color: "#2980B9", textDecoration: "none" }}>
+                          🔗 <span style={{ direction: "ltr", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{coupon.url}</span>
+                        </a>
+                      )}
+
+                      <div style={{ display: "flex", gap: 12, marginTop: 10, alignItems: "center" }}>
+                        <span style={{ fontSize: 11, color: "#CCC" }}>📅 {formatDate(coupon.date)}</span>
+                        <span style={{ fontSize: 11, color: uc.color, fontWeight: 500 }}>👤 {coupon.addedBy}</span>
+                      </div>
                     </div>
                   </div>
                 </SwipeItem>
@@ -594,52 +489,78 @@ export default function GroceryApp() {
         </div>
       </div>
 
-      {/* FAB */}
-      {!showAdd && (
-        <button
-          onClick={() => setShowAdd(true)}
-          style={{
-            position: "fixed",
-            bottom: 28,
-            left: "50%",
-            transform: "translateX(-50%)",
-            width: 60,
-            height: 60,
-            borderRadius: "50%",
-            border: "none",
-            background: "linear-gradient(135deg, #2D3436, #636E72)",
-            color: "#fff",
-            fontSize: 30,
-            fontWeight: 300,
-            cursor: "pointer",
-            boxShadow: "0 6px 24px rgba(45,52,54,0.35)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            transition: "transform 0.2s, box-shadow 0.2s",
-            zIndex: 50,
-          }}
-          onMouseEnter={(e) => {
-            e.target.style.transform = "translateX(-50%) scale(1.1)";
-            e.target.style.boxShadow = "0 8px 32px rgba(45,52,54,0.45)";
-          }}
-          onMouseLeave={(e) => {
-            e.target.style.transform = "translateX(-50%) scale(1)";
-            e.target.style.boxShadow = "0 6px 24px rgba(45,52,54,0.35)";
-          }}
-        >
-          +
-        </button>
-      )}
-
-      <style>{`
-        @keyframes slideDown {
-          from { opacity: 0; transform: translateY(-12px); }
-          to { opacity: 1; transform: translateY(0); }
-        }
-        * { -webkit-tap-highlight-color: transparent; }
-        input::placeholder { color: #CCC; }
-      `}</style>
+      {!showAdd && <FAB onClick={() => setShowAdd(true)} color="linear-gradient(135deg, #8E44AD, #6C3483)" shadow="rgba(142,68,173,0.4)" />}
+      <GlobalStyles />
     </div>
   );
+}
+
+// ─── Shared micro-components ──────────────────────────────────────────────────
+
+function Loader() {
+  return (
+    <div style={{ display: "flex", justifyContent: "center", alignItems: "center", height: "100vh", fontFamily: "'Rubik', sans-serif" }}>
+      <p style={{ color: "#888", fontSize: 18 }}>טוען...</p>
+    </div>
+  );
+}
+
+function BackButton({ onBack, light }) {
+  return (
+    <button onClick={onBack}
+      style={{ background: light ? "rgba(255,255,255,0.15)" : "rgba(255,255,255,0.12)", border: "none", borderRadius: 10, padding: "8px 14px", fontSize: 13, color: light ? "rgba(255,255,255,0.9)" : "rgba(255,255,255,0.8)", fontFamily: "inherit", cursor: "pointer" }}>
+      ← בית
+    </button>
+  );
+}
+
+function FAB({ onClick, color, shadow }) {
+  return (
+    <button onClick={onClick}
+      style={{ position: "fixed", bottom: 28, left: "50%", transform: "translateX(-50%)", width: 60, height: 60, borderRadius: "50%", border: "none", background: color, color: "#fff", fontSize: 30, cursor: "pointer", boxShadow: `0 6px 24px ${shadow}`, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50 }}>
+      +
+    </button>
+  );
+}
+
+function DeleteHint() {
+  return (
+    <div style={{ position: "absolute", inset: 0, background: "#E53935", borderRadius: "inherit", display: "flex", alignItems: "center", justifyContent: "flex-start", paddingLeft: 24, color: "#fff", fontSize: 14, fontWeight: 600 }}>
+      🗑️ מחיקה
+    </div>
+  );
+}
+
+function GlobalStyles() {
+  return (
+    <style>{`
+      @keyframes slideDown { from { opacity: 0; transform: translateY(-12px); } to { opacity: 1; transform: translateY(0); } }
+      * { -webkit-tap-highlight-color: transparent; }
+      input::placeholder { color: #CCC; }
+    `}</style>
+  );
+}
+
+// ─── Root ─────────────────────────────────────────────────────────────────────
+
+export default function GroceryApp() {
+  const [userName, setUserName] = useState(() => localStorage.getItem("grocery-username") || "");
+  const [authReady, setAuthReady] = useState(false);
+  const [screen, setScreen] = useState("home");
+
+  const saveName = (name) => { localStorage.setItem("grocery-username", name); setUserName(name); };
+
+  useEffect(() => {
+    auth.authStateReady()
+      .then(() => { if (!auth.currentUser) return signInAnonymously(auth); })
+      .then(() => setAuthReady(true))
+      .catch((e) => console.error("Auth error:", e));
+  }, []);
+
+  if (!authReady) return <Loader />;
+  if (!userName)  return <NameSetup onSave={saveName} />;
+
+  if (screen === "shopping") return <ShoppingScreen userName={userName} onBack={() => setScreen("home")} />;
+  if (screen === "coupons")  return <CouponsScreen  userName={userName} onBack={() => setScreen("home")} />;
+  return <HomeScreen userName={userName} onNavigate={setScreen} />;
 }
