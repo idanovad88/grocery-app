@@ -416,7 +416,11 @@ function CouponsScreen({ userName, onBack }) {
   const [filePreview, setFilePreview] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [copiedId, setCopiedId] = useState(null);
+  const [fileError, setFileError]         = useState(null);
+  const [editFileError, setEditFileError] = useState(null);
   const fileInputRef = useRef(null);
+
+  const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
 
   // Undo-delete state
   const [pendingDelete, setPendingDelete] = useState(null);
@@ -441,12 +445,18 @@ function CouponsScreen({ userName, onBack }) {
   const handleFileChange = (e) => {
     const f = e.target.files[0];
     if (!f) return;
+    if (f.size > MAX_FILE_SIZE) {
+      setFileError(`הקובץ גדול מדי (${(f.size / 1024 / 1024).toFixed(1)}MB) — מקסימום 5MB`);
+      e.target.value = "";
+      return;
+    }
+    setFileError(null);
     setFile(f);
     if (f.type.startsWith("image/")) { const r = new FileReader(); r.onload = (ev) => setFilePreview(ev.target.result); r.readAsDataURL(f); }
     else setFilePreview("pdf");
   };
 
-  const resetForm = () => { setTitle(""); setCode(""); setUrl(""); setExpiryDate(""); setFile(null); setFilePreview(null); setShowAdd(false); };
+  const resetForm = () => { setTitle(""); setCode(""); setUrl(""); setExpiryDate(""); setFile(null); setFilePreview(null); setFileError(null); setShowAdd(false); };
 
   const addCoupon = async () => {
     if (!title.trim()) return;
@@ -489,11 +499,17 @@ function CouponsScreen({ userName, onBack }) {
     setEditFilePreview(coupon.imageUrl || null);
   };
 
-  const closeEdit = () => { setEditingCoupon(null); setEditFile(null); setEditFilePreview(null); };
+  const closeEdit = () => { setEditingCoupon(null); setEditFile(null); setEditFilePreview(null); setEditFileError(null); };
 
   const handleEditFileChange = (e) => {
     const f = e.target.files[0];
     if (!f) return;
+    if (f.size > MAX_FILE_SIZE) {
+      setEditFileError(`הקובץ גדול מדי (${(f.size / 1024 / 1024).toFixed(1)}MB) — מקסימום 5MB`);
+      e.target.value = "";
+      return;
+    }
+    setEditFileError(null);
     setEditFile(f);
     if (f.type.startsWith("image/")) { const r = new FileReader(); r.onload = (ev) => setEditFilePreview(ev.target.result); r.readAsDataURL(f); }
     else setEditFilePreview("pdf");
@@ -578,10 +594,11 @@ function CouponsScreen({ userName, onBack }) {
                 </div>
               ) : (
                 <button onClick={() => fileInputRef.current.click()}
-                  style={{ width: "100%", border: "2px dashed #E8E5E0", background: "#FAFAFA", borderRadius: 12, padding: 16, cursor: "pointer", fontSize: 14, color: "#AAA", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+                  style={{ width: "100%", border: `2px dashed ${fileError ? "#E53935" : "#E8E5E0"}`, background: fileError ? "#FFF5F5" : "#FAFAFA", borderRadius: 12, padding: 16, cursor: "pointer", fontSize: 14, color: fileError ? "#E53935" : "#AAA", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
                   📎 צרף תמונה או PDF (אופציונלי)
                 </button>
               )}
+              {fileError && <p style={{ margin: "6px 0 0", fontSize: 12, color: "#E53935", fontWeight: 500 }}>⚠️ {fileError}</p>}
             </div>
 
             <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
@@ -696,10 +713,11 @@ function CouponsScreen({ userName, onBack }) {
                 </div>
               ) : (
                 <button onClick={() => editFileInputRef.current.click()}
-                  style={{ width: "100%", border: "2px dashed #E8E5E0", background: "#FAFAFA", borderRadius: 12, padding: 16, cursor: "pointer", fontSize: 14, color: "#AAA", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+                  style={{ width: "100%", border: `2px dashed ${editFileError ? "#E53935" : "#E8E5E0"}`, background: editFileError ? "#FFF5F5" : "#FAFAFA", borderRadius: 12, padding: 16, cursor: "pointer", fontSize: 14, color: editFileError ? "#E53935" : "#AAA", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
                   📎 צרף תמונה או PDF (אופציונלי)
                 </button>
               )}
+              {editFileError && <p style={{ margin: "6px 0 0", fontSize: 12, color: "#E53935", fontWeight: 500 }}>⚠️ {editFileError}</p>}
             </div>
 
             <div style={{ display: "flex", gap: 8, marginTop: 16, paddingBottom: 8 }}>
