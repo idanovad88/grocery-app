@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { initializeApp } from "firebase/app";
-import { getFirestore, collection, addDoc, deleteDoc, doc, onSnapshot, query, orderBy } from "firebase/firestore";
+import { getFirestore, collection, addDoc, deleteDoc, updateDoc, doc, onSnapshot, query, orderBy } from "firebase/firestore";
 import { getAuth, signInAnonymously } from "firebase/auth";
 import { getStorage, ref, uploadBytes, getDownloadURL } from "firebase/storage";
 
@@ -88,34 +88,57 @@ function getExpiryStatus(dateStr) {
 }
 
 // ─── SwipeItem ────────────────────────────────────────────────────────────────
+// onSwipeLeft  = delete (swipe left)
+// onSwipeRight = edit   (swipe right, optional)
 
-function SwipeItem({ children, onSwipe }) {
-  const startX  = useRef(0);
+function SwipeItem({ children, onSwipeLeft, onSwipeRight, borderRadius = 16 }) {
+  const startX   = useRef(0);
   const currentX = useRef(0);
   const swiping  = useRef(false);
-  const [offset, setOffset]   = useState(0);
+  const [offset, setOffset]     = useState(0);
   const [removing, setRemoving] = useState(false);
 
   const onStart = (e) => { startX.current = e.touches ? e.touches[0].clientX : e.clientX; swiping.current = true; };
   const onMove  = (e) => {
     if (!swiping.current) return;
     const diff = (e.touches ? e.touches[0].clientX : e.clientX) - startX.current;
-    if (diff < 0) { currentX.current = diff; setOffset(diff); }
+    currentX.current = diff;
+    setOffset(diff);
   };
   const onEnd = () => {
     swiping.current = false;
-    if (currentX.current < -100) { setRemoving(true); setOffset(-500); setTimeout(onSwipe, 300); }
-    else { currentX.current = 0; setOffset(0); }
+    if (currentX.current < -80) {
+      setRemoving(true); setOffset(-500); setTimeout(onSwipeLeft, 300);
+    } else if (currentX.current > 80 && onSwipeRight) {
+      currentX.current = 0; setOffset(0);
+      onSwipeRight();
+    } else {
+      currentX.current = 0; setOffset(0);
+    }
   };
 
+  const dir = offset < -15 ? "left" : offset > 15 ? "right" : null;
+
   return (
-    <div
-      onTouchStart={onStart} onTouchMove={onMove} onTouchEnd={onEnd}
-      onMouseDown={onStart}  onMouseMove={onMove} onMouseUp={onEnd}
-      onMouseLeave={() => { if (swiping.current) onEnd(); }}
-      style={{ transform: `translateX(${offset}px)`, transition: swiping.current ? "none" : "transform 0.3s ease", opacity: removing ? 0 : 1, cursor: "grab", userSelect: "none" }}
-    >
-      {children}
+    <div style={{ position: "relative", overflow: "hidden", borderRadius }}>
+      {/* Delete hint — left swipe */}
+      <div style={{ position: "absolute", inset: 0, background: "#E53935", display: "flex", alignItems: "center", justifyContent: "flex-start", paddingLeft: 24, color: "#fff", fontSize: 14, fontWeight: 600 }}>
+        🗑️ מחיקה
+      </div>
+      {/* Edit hint — right swipe */}
+      {onSwipeRight && (
+        <div style={{ position: "absolute", inset: 0, background: "#8E44AD", display: "flex", alignItems: "center", justifyContent: "flex-end", paddingRight: 24, color: "#fff", fontSize: 14, fontWeight: 600, opacity: dir === "right" ? 1 : 0, transition: "opacity 0.15s" }}>
+          עריכה ✏️
+        </div>
+      )}
+      <div
+        onTouchStart={onStart} onTouchMove={onMove} onTouchEnd={onEnd}
+        onMouseDown={onStart}  onMouseMove={onMove} onMouseUp={onEnd}
+        onMouseLeave={() => { if (swiping.current) onEnd(); }}
+        style={{ transform: `translateX(${offset}px)`, transition: swiping.current ? "none" : "transform 0.3s ease", opacity: removing ? 0 : 1, cursor: "grab", userSelect: "none" }}
+      >
+        {children}
+      </div>
     </div>
   );
 }
@@ -285,22 +308,19 @@ function ShoppingScreen({ userName, onBack }) {
           {sorted.map((item) => {
             const cfg = PRIORITY_CONFIG[item.priority];
             return (
-              <div key={item.id} style={{ position: "relative", overflow: "hidden", borderRadius: 16 }}>
-                <DeleteHint />
-                <SwipeItem onSwipe={() => removeItem(item.id)}>
-                  <div style={{ background: "#fff", borderRadius: 16, padding: "16px 18px", display: "flex", alignItems: "center", gap: 14, boxShadow: "0 2px 8px rgba(0,0,0,0.04)", borderRight: `4px solid ${cfg.color}` }}>
-                    <div style={{ width: 40, height: 40, borderRadius: 12, background: cfg.bg, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, flexShrink: 0 }}>{cfg.icon}</div>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <p style={{ margin: 0, fontSize: 16, fontWeight: 500, color: "#2D3436" }}>{item.name}</p>
-                      <div style={{ display: "flex", gap: 12, marginTop: 4, alignItems: "center" }}>
-                        <span style={{ fontSize: 12, color: "#AAA", fontWeight: 300 }}>📅 {formatDate(item.date)}</span>
-                        <span style={{ fontSize: 12, color: getUserColor(item.addedBy).color, fontWeight: 500 }}>👤 {item.addedBy}</span>
-                      </div>
+              <SwipeItem key={item.id} onSwipeLeft={() => removeItem(item.id)}>
+                <div style={{ background: "#fff", borderRadius: 16, padding: "16px 18px", display: "flex", alignItems: "center", gap: 14, boxShadow: "0 2px 8px rgba(0,0,0,0.04)", borderRight: `4px solid ${cfg.color}` }}>
+                  <div style={{ width: 40, height: 40, borderRadius: 12, background: cfg.bg, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, flexShrink: 0 }}>{cfg.icon}</div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <p style={{ margin: 0, fontSize: 16, fontWeight: 500, color: "#2D3436" }}>{item.name}</p>
+                    <div style={{ display: "flex", gap: 12, marginTop: 4, alignItems: "center" }}>
+                      <span style={{ fontSize: 12, color: "#AAA", fontWeight: 300 }}>📅 {formatDate(item.date)}</span>
+                      <span style={{ fontSize: 12, color: getUserColor(item.addedBy).color, fontWeight: 500 }}>👤 {item.addedBy}</span>
                     </div>
-                    <div style={{ fontSize: 11, fontWeight: 600, color: cfg.color, background: cfg.bg, padding: "4px 10px", borderRadius: 8, flexShrink: 0 }}>{cfg.label}</div>
                   </div>
-                </SwipeItem>
-              </div>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: cfg.color, background: cfg.bg, padding: "4px 10px", borderRadius: 8, flexShrink: 0 }}>{cfg.label}</div>
+                </div>
+              </SwipeItem>
             );
           })}
         </div>
@@ -327,6 +347,17 @@ function CouponsScreen({ userName, onBack }) {
   const [uploading, setUploading] = useState(false);
   const [copiedId, setCopiedId] = useState(null);
   const fileInputRef = useRef(null);
+
+  // Edit state
+  const [editingCoupon, setEditingCoupon]     = useState(null);
+  const [editTitle, setEditTitle]             = useState("");
+  const [editCode, setEditCode]               = useState("");
+  const [editUrl, setEditUrl]                 = useState("");
+  const [editExpiryDate, setEditExpiryDate]   = useState("");
+  const [editFile, setEditFile]               = useState(null);
+  const [editFilePreview, setEditFilePreview] = useState(null);
+  const [editUploading, setEditUploading]     = useState(false);
+  const editFileInputRef = useRef(null);
 
   useEffect(() => {
     const q = query(collection(db, "coupons"), orderBy("date", "desc"));
@@ -364,6 +395,51 @@ function CouponsScreen({ userName, onBack }) {
   const removeCoupon = async (id) => { try { await deleteDoc(doc(db, "coupons", id)); } catch (e) { console.error(e); } };
 
   const copyCode = (id, c) => { navigator.clipboard.writeText(c).then(() => { setCopiedId(id); setTimeout(() => setCopiedId(null), 2000); }); };
+
+  const openEdit = (coupon) => {
+    setEditingCoupon(coupon);
+    setEditTitle(coupon.title || "");
+    setEditCode(coupon.code || "");
+    setEditUrl(coupon.url || "");
+    setEditExpiryDate(coupon.expiryDate || "");
+    setEditFile(null);
+    setEditFilePreview(coupon.imageUrl || null);
+  };
+
+  const closeEdit = () => { setEditingCoupon(null); setEditFile(null); setEditFilePreview(null); };
+
+  const handleEditFileChange = (e) => {
+    const f = e.target.files[0];
+    if (!f) return;
+    setEditFile(f);
+    if (f.type.startsWith("image/")) { const r = new FileReader(); r.onload = (ev) => setEditFilePreview(ev.target.result); r.readAsDataURL(f); }
+    else setEditFilePreview("pdf");
+  };
+
+  const updateCoupon = async () => {
+    if (!editTitle.trim()) return;
+    setEditUploading(true);
+    try {
+      let imageUrl  = editingCoupon.imageUrl  || "";
+      let imagePath = editingCoupon.imagePath || "";
+      if (editFile) {
+        imagePath = `coupons/${Date.now()}_${editFile.name}`;
+        const storageRef = ref(storage, imagePath);
+        await uploadBytes(storageRef, editFile);
+        imageUrl = await getDownloadURL(storageRef);
+      }
+      await updateDoc(doc(db, "coupons", editingCoupon.id), {
+        title: editTitle.trim(),
+        code: editCode.trim(),
+        url: editUrl.trim(),
+        expiryDate: editExpiryDate,
+        imageUrl,
+        imagePath,
+      });
+      closeEdit();
+    } catch (e) { console.error("Error updating coupon:", e); }
+    setEditUploading(false);
+  };
 
   const sorted = [...coupons].sort((a, b) => {
     const rank = (c) => { if (!c.expiryDate) return 1; const d = new Date(c.expiryDate)-new Date(); return d < 0 ? 3 : d < 604800000 ? 2 : 1; };
@@ -442,54 +518,109 @@ function CouponsScreen({ userName, onBack }) {
           </div>
         )}
 
+        {sorted.length > 0 && <p style={{ textAlign: "center", fontSize: 12, color: "#BBB", margin: "8px 0 12px", fontWeight: 300 }}>עריכה → | ← מחיקה</p>}
+
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           {sorted.map((coupon) => {
             const expiry    = getExpiryStatus(coupon.expiryDate);
             const uc        = getUserColor(coupon.addedBy);
             const isExpired = expiry && new Date(coupon.expiryDate) < new Date();
             return (
-              <div key={coupon.id} style={{ position: "relative", overflow: "hidden", borderRadius: 18 }}>
-                <DeleteHint />
-                <SwipeItem onSwipe={() => removeCoupon(coupon.id)}>
-                  <div style={{ background: "#fff", borderRadius: 18, overflow: "hidden", boxShadow: "0 2px 12px rgba(0,0,0,0.06)", opacity: isExpired ? 0.6 : 1 }}>
-                    {coupon.imageUrl && <img src={coupon.imageUrl} alt={coupon.title} style={{ width: "100%", height: 140, objectFit: "cover" }} />}
-                    <div style={{ padding: "14px 16px" }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
-                        <p style={{ margin: 0, fontSize: 16, fontWeight: 600, color: "#2D3436", flex: 1 }}>🎟️ {coupon.title}</p>
-                        {expiry && <span style={{ fontSize: 11, fontWeight: 600, color: expiry.color, background: expiry.bg, padding: "3px 8px", borderRadius: 8, flexShrink: 0 }}>⏱ {expiry.label}</span>}
+              <SwipeItem key={coupon.id} borderRadius={18} onSwipeLeft={() => removeCoupon(coupon.id)} onSwipeRight={() => openEdit(coupon)}>
+                <div style={{ background: "#fff", borderRadius: 18, overflow: "hidden", boxShadow: "0 2px 12px rgba(0,0,0,0.06)", opacity: isExpired ? 0.6 : 1 }}>
+                  {coupon.imageUrl && <img src={coupon.imageUrl} alt={coupon.title} style={{ width: "100%", height: 140, objectFit: "cover" }} />}
+                  <div style={{ padding: "14px 16px" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+                      <p style={{ margin: 0, fontSize: 16, fontWeight: 600, color: "#2D3436", flex: 1 }}>🎟️ {coupon.title}</p>
+                      {expiry && <span style={{ fontSize: 11, fontWeight: 600, color: expiry.color, background: expiry.bg, padding: "3px 8px", borderRadius: 8, flexShrink: 0 }}>⏱ {expiry.label}</span>}
+                    </div>
+
+                    {coupon.code && (
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10, background: "#F5EEF8", borderRadius: 10, padding: "8px 12px" }}>
+                        <span style={{ flex: 1, fontSize: 15, fontWeight: 700, color: "#8E44AD", letterSpacing: 1, direction: "ltr" }}>{coupon.code}</span>
+                        <button onClick={() => copyCode(coupon.id, coupon.code)}
+                          style={{ background: copiedId===coupon.id ? "#8E44AD" : "transparent", border: "none", borderRadius: 6, padding: "4px 8px", fontSize: 12, color: copiedId===coupon.id ? "#fff" : "#8E44AD", cursor: "pointer", fontFamily: "inherit", fontWeight: 500, transition: "all 0.2s" }}>
+                          {copiedId===coupon.id ? "✓ הועתק" : "העתק"}
+                        </button>
                       </div>
+                    )}
 
-                      {coupon.code && (
-                        <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10, background: "#F5EEF8", borderRadius: 10, padding: "8px 12px" }}>
-                          <span style={{ flex: 1, fontSize: 15, fontWeight: 700, color: "#8E44AD", letterSpacing: 1, direction: "ltr" }}>{coupon.code}</span>
-                          <button onClick={() => copyCode(coupon.id, coupon.code)}
-                            style={{ background: copiedId===coupon.id ? "#8E44AD" : "transparent", border: "none", borderRadius: 6, padding: "4px 8px", fontSize: 12, color: copiedId===coupon.id ? "#fff" : "#8E44AD", cursor: "pointer", fontFamily: "inherit", fontWeight: 500, transition: "all 0.2s" }}>
-                            {copiedId===coupon.id ? "✓ הועתק" : "העתק"}
-                          </button>
-                        </div>
-                      )}
+                    {coupon.url && (
+                      <a href={coupon.url} target="_blank" rel="noopener noreferrer"
+                        style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 8, fontSize: 13, color: "#2980B9", textDecoration: "none" }}>
+                        🔗 <span style={{ direction: "ltr", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{coupon.url}</span>
+                      </a>
+                    )}
 
-                      {coupon.url && (
-                        <a href={coupon.url} target="_blank" rel="noopener noreferrer"
-                          style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 8, fontSize: 13, color: "#2980B9", textDecoration: "none" }}>
-                          🔗 <span style={{ direction: "ltr", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{coupon.url}</span>
-                        </a>
-                      )}
-
-                      <div style={{ display: "flex", gap: 12, marginTop: 10, alignItems: "center" }}>
-                        <span style={{ fontSize: 11, color: "#CCC" }}>📅 {formatDate(coupon.date)}</span>
-                        <span style={{ fontSize: 11, color: uc.color, fontWeight: 500 }}>👤 {coupon.addedBy}</span>
-                      </div>
+                    <div style={{ display: "flex", gap: 12, marginTop: 10, alignItems: "center" }}>
+                      <span style={{ fontSize: 11, color: "#CCC" }}>📅 {formatDate(coupon.date)}</span>
+                      <span style={{ fontSize: 11, color: uc.color, fontWeight: 500 }}>👤 {coupon.addedBy}</span>
                     </div>
                   </div>
-                </SwipeItem>
-              </div>
+                </div>
+              </SwipeItem>
             );
           })}
         </div>
       </div>
 
       {!showAdd && <FAB onClick={() => setShowAdd(true)} color="linear-gradient(135deg, #8E44AD, #6C3483)" shadow="rgba(142,68,173,0.4)" />}
+
+      {/* ── Edit Modal ── */}
+      {editingCoupon && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 100, display: "flex", alignItems: "flex-end", justifyContent: "center" }} onClick={(e) => { if (e.target === e.currentTarget) closeEdit(); }}>
+          <div dir="rtl" style={{ background: "#fff", borderRadius: "24px 24px 0 0", padding: 24, width: "100%", maxWidth: 480, maxHeight: "90vh", overflowY: "auto", animation: "slideUp 0.3s ease" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+              <h3 style={{ margin: 0, fontSize: 17, fontWeight: 600, color: "#2D3436" }}>✏️ עריכת שובר</h3>
+              <button onClick={closeEdit} style={{ background: "none", border: "none", fontSize: 22, cursor: "pointer", color: "#999", lineHeight: 1 }}>✕</button>
+            </div>
+
+            <input value={editTitle} onChange={(e) => setEditTitle(e.target.value)} placeholder="שם החנות / תיאור *"
+              style={inputStyle} onFocus={(e) => (e.target.style.borderColor = "#8E44AD")} onBlur={(e) => (e.target.style.borderColor = "#E8E5E0")} />
+
+            <input value={editCode} onChange={(e) => setEditCode(e.target.value)} placeholder="קוד השובר (אופציונלי)"
+              style={{ ...inputStyle, marginTop: 10, letterSpacing: 1 }} onFocus={(e) => (e.target.style.borderColor = "#8E44AD")} onBlur={(e) => (e.target.style.borderColor = "#E8E5E0")} />
+
+            <input value={editUrl} onChange={(e) => setEditUrl(e.target.value)} placeholder="קישור לשובר (אופציונלי)" type="url" dir="ltr"
+              style={{ ...inputStyle, marginTop: 10 }} onFocus={(e) => (e.target.style.borderColor = "#8E44AD")} onBlur={(e) => (e.target.style.borderColor = "#E8E5E0")} />
+
+            <div style={{ marginTop: 10 }}>
+              <p style={{ margin: "0 0 6px", fontSize: 13, color: "#888" }}>תאריך תפוגה (אופציונלי)</p>
+              <input value={editExpiryDate} onChange={(e) => setEditExpiryDate(e.target.value)} type="date"
+                style={{ ...inputStyle, color: editExpiryDate ? "#2D3436" : "#CCC" }} onFocus={(e) => (e.target.style.borderColor = "#8E44AD")} onBlur={(e) => (e.target.style.borderColor = "#E8E5E0")} />
+            </div>
+
+            <div style={{ marginTop: 10 }}>
+              <input ref={editFileInputRef} type="file" accept="image/*,application/pdf" onChange={handleEditFileChange} style={{ display: "none" }} />
+              {editFilePreview ? (
+                <div style={{ position: "relative" }}>
+                  {editFilePreview === "pdf"
+                    ? <div style={{ background: "#F5EEF8", borderRadius: 12, padding: 16, textAlign: "center", color: "#8E44AD", fontSize: 14 }}>📄 {editFile ? editFile.name : "קובץ מצורף"}</div>
+                    : <img src={editFilePreview} alt="preview" style={{ width: "100%", borderRadius: 12, maxHeight: 160, objectFit: "cover" }} />
+                  }
+                  <button onClick={() => { setEditFile(null); setEditFilePreview(null); }}
+                    style={{ position: "absolute", top: 8, left: 8, background: "rgba(0,0,0,0.5)", color: "#fff", border: "none", borderRadius: "50%", width: 28, height: 28, cursor: "pointer", fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
+                </div>
+              ) : (
+                <button onClick={() => editFileInputRef.current.click()}
+                  style={{ width: "100%", border: "2px dashed #E8E5E0", background: "#FAFAFA", borderRadius: 12, padding: 16, cursor: "pointer", fontSize: 14, color: "#AAA", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+                  📎 צרף תמונה או PDF (אופציונלי)
+                </button>
+              )}
+            </div>
+
+            <div style={{ display: "flex", gap: 8, marginTop: 16, paddingBottom: 8 }}>
+              <button onClick={updateCoupon} disabled={!editTitle.trim() || editUploading}
+                style={{ flex: 1, border: "none", background: editTitle.trim() && !editUploading ? "linear-gradient(135deg, #8E44AD, #6C3483)" : "#ccc", color: "#fff", borderRadius: 12, padding: "14px", fontSize: 15, fontWeight: 600, fontFamily: "inherit", cursor: editTitle.trim() && !editUploading ? "pointer" : "default" }}>
+                {editUploading ? "שומר..." : "שמור שינויים ✓"}
+              </button>
+              <button onClick={closeEdit}
+                style={{ border: "2px solid #E8E5E0", background: "#fff", color: "#999", borderRadius: 12, padding: "14px 20px", fontSize: 15, fontFamily: "inherit", cursor: "pointer" }}>✕</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <GlobalStyles />
     </div>
   );
@@ -523,18 +654,11 @@ function FAB({ onClick, color, shadow }) {
   );
 }
 
-function DeleteHint() {
-  return (
-    <div style={{ position: "absolute", inset: 0, background: "#E53935", borderRadius: "inherit", display: "flex", alignItems: "center", justifyContent: "flex-start", paddingLeft: 24, color: "#fff", fontSize: 14, fontWeight: 600 }}>
-      🗑️ מחיקה
-    </div>
-  );
-}
-
 function GlobalStyles() {
   return (
     <style>{`
       @keyframes slideDown { from { opacity: 0; transform: translateY(-12px); } to { opacity: 1; transform: translateY(0); } }
+      @keyframes slideUp   { from { opacity: 0; transform: translateY(40px);  } to { opacity: 1; transform: translateY(0); } }
       * { -webkit-tap-highlight-color: transparent; }
       input::placeholder { color: #CCC; }
     `}</style>
