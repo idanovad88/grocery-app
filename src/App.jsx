@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { initializeApp } from "firebase/app";
-import { getFirestore, collection, addDoc, deleteDoc, updateDoc, doc, onSnapshot, query, orderBy } from "firebase/firestore";
+import { getFirestore, collection, addDoc, deleteDoc, updateDoc, doc, getDoc, onSnapshot, query, orderBy, getDocs, where, setDoc } from "firebase/firestore";
 import { getAuth, signInAnonymously } from "firebase/auth";
 import { getStorage, ref, uploadBytes, getDownloadURL } from "firebase/storage";
 
@@ -88,6 +88,10 @@ function getExpiryStatus(dateStr) {
   return { label: `${String(d.getDate()).padStart(2,"0")}/${String(d.getMonth()+1).padStart(2,"0")}/${d.getFullYear()}`, color: "#43A047", bg: "#E8F5E9" };
 }
 
+function generateCode() {
+  return Math.random().toString(36).substring(2, 8).toUpperCase();
+}
+
 // ─── SwipeItem ────────────────────────────────────────────────────────────────
 // onSwipeLeft  = delete (swipe left)
 // onSwipeRight = edit   (swipe right, optional)
@@ -169,9 +173,137 @@ function NameSetup({ onSave }) {
   );
 }
 
+// ─── HouseholdSetup ───────────────────────────────────────────────────────────
+
+function HouseholdSetup({ userName, onDone }) {
+  const [mode, setMode]         = useState(null); // "create" | "join"
+  const [name, setName]         = useState("");
+  const [joinCode, setJoinCode] = useState("");
+  const [loading, setLoading]   = useState(false);
+  const [error, setError]       = useState("");
+  const [createdCode, setCreatedCode] = useState(null); // after creation, show code
+  const [createdId, setCreatedId]     = useState(null);
+  const [createdName, setCreatedName] = useState(null);
+
+  const createHousehold = async () => {
+    if (!name.trim()) return;
+    setLoading(true); setError("");
+    try {
+      const inviteCode = generateCode();
+      const newRef = doc(collection(db, "households"));
+      await setDoc(newRef, { name: name.trim(), inviteCode, createdBy: userName, createdAt: new Date().toISOString() });
+      setCreatedCode(inviteCode);
+      setCreatedId(newRef.id);
+      setCreatedName(name.trim());
+    } catch (e) { setError("שגיאה ביצירת משק הבית. נסה שוב."); console.error(e); }
+    setLoading(false);
+  };
+
+  const finishCreate = () => {
+    localStorage.setItem("grocery-householdId", createdId);
+    localStorage.setItem("grocery-householdName", createdName);
+    onDone(createdId, createdName);
+  };
+
+  const joinHousehold = async () => {
+    const code = joinCode.trim().toUpperCase();
+    if (code.length !== 6) { setError("הזן קוד בן 6 תווים"); return; }
+    setLoading(true); setError("");
+    try {
+      const q = query(collection(db, "households"), where("inviteCode", "==", code));
+      const snap = await getDocs(q);
+      if (snap.empty) { setError("קוד לא נמצא. בדוק שוב."); setLoading(false); return; }
+      const hDoc = snap.docs[0];
+      localStorage.setItem("grocery-householdId", hDoc.id);
+      localStorage.setItem("grocery-householdName", hDoc.data().name);
+      onDone(hDoc.id, hDoc.data().name);
+    } catch (e) { setError("שגיאה בחיבור. נסה שוב."); console.error(e); }
+    setLoading(false);
+  };
+
+  const btnBase = { border: "none", borderRadius: 14, padding: "14px", fontSize: 16, fontWeight: 600, fontFamily: "inherit", cursor: "pointer", color: "#fff" };
+
+  // ── After create: show invite code ──
+  if (createdCode) {
+    return (
+      <div dir="rtl" style={{ fontFamily: "'Rubik', sans-serif", maxWidth: 480, margin: "0 auto", minHeight: "100vh", background: "linear-gradient(165deg, #FAFAFA 0%, #F0EDE8 100%)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 24 }}>
+        <div style={{ fontSize: 64, marginBottom: 16 }}>🎉</div>
+        <h2 style={{ margin: "0 0 8px", fontSize: 22, fontWeight: 700, color: "#2D3436" }}>משק הבית נוצר!</h2>
+        <p style={{ fontSize: 15, color: "#888", marginBottom: 24, textAlign: "center" }}>שתף את הקוד הזה עם בני המשפחה כדי שיוכלו להצטרף:</p>
+        <div style={{ background: "#fff", borderRadius: 20, padding: "20px 40px", boxShadow: "0 4px 20px rgba(0,0,0,0.08)", marginBottom: 28, textAlign: "center" }}>
+          <p style={{ margin: "0 0 8px", fontSize: 13, color: "#AAA" }}>קוד הצטרפות</p>
+          <div style={{ fontSize: 36, fontWeight: 700, letterSpacing: 8, color: "#2D3436" }}>{createdCode}</div>
+        </div>
+        <button onClick={finishCreate} style={{ ...btnBase, width: "100%", maxWidth: 280, background: "linear-gradient(135deg, #2D3436, #636E72)" }}>
+          המשך לאפליקציה ✓
+        </button>
+      </div>
+    );
+  }
+
+  // ── Mode selection ──
+  if (!mode) {
+    return (
+      <div dir="rtl" style={{ fontFamily: "'Rubik', sans-serif", maxWidth: 480, margin: "0 auto", minHeight: "100vh", background: "linear-gradient(165deg, #FAFAFA 0%, #F0EDE8 100%)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 24 }}>
+        <div style={{ fontSize: 64, marginBottom: 20 }}>🏠</div>
+        <h1 style={{ fontSize: 24, fontWeight: 700, color: "#2D3436", marginBottom: 8 }}>ברוך הבא, {userName}!</h1>
+        <p style={{ fontSize: 15, color: "#888", marginBottom: 36, textAlign: "center", fontWeight: 300 }}>צור משק בית חדש או הצטרף לקיים</p>
+        <div style={{ width: "100%", maxWidth: 320, display: "flex", flexDirection: "column", gap: 14 }}>
+          <button onClick={() => setMode("create")} style={{ ...btnBase, background: "linear-gradient(135deg, #2D3436, #636E72)" }}>
+            🏠 צור משק בית חדש
+          </button>
+          <button onClick={() => setMode("join")} style={{ ...btnBase, background: "linear-gradient(135deg, #8E44AD, #6C3483)" }}>
+            🔗 הצטרף למשק בית קיים
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Create mode ──
+  if (mode === "create") {
+    return (
+      <div dir="rtl" style={{ fontFamily: "'Rubik', sans-serif", maxWidth: 480, margin: "0 auto", minHeight: "100vh", background: "linear-gradient(165deg, #FAFAFA 0%, #F0EDE8 100%)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 24 }}>
+        <div style={{ fontSize: 64, marginBottom: 20 }}>🏠</div>
+        <h2 style={{ fontSize: 22, fontWeight: 700, color: "#2D3436", marginBottom: 8 }}>משק בית חדש</h2>
+        <p style={{ fontSize: 15, color: "#888", marginBottom: 28, fontWeight: 300 }}>תן שם למשק הבית שלך</p>
+        <input value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && name.trim() && createHousehold()}
+          placeholder='למשל: "משפחת לוי"' autoFocus
+          style={{ ...inputStyle, maxWidth: 300, fontSize: 16, textAlign: "center", marginBottom: 14 }} />
+        {error && <p style={{ color: "#E53935", fontSize: 13, marginBottom: 10 }}>{error}</p>}
+        <div style={{ display: "flex", gap: 10, width: "100%", maxWidth: 300 }}>
+          <button onClick={() => { setMode(null); setError(""); }} style={{ ...btnBase, flex: 1, background: "#ccc" }}>← חזור</button>
+          <button onClick={createHousehold} disabled={!name.trim() || loading} style={{ ...btnBase, flex: 2, background: name.trim() && !loading ? "linear-gradient(135deg, #2D3436, #636E72)" : "#ccc" }}>
+            {loading ? "יוצר..." : "צור ✓"}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Join mode ──
+  return (
+    <div dir="rtl" style={{ fontFamily: "'Rubik', sans-serif", maxWidth: 480, margin: "0 auto", minHeight: "100vh", background: "linear-gradient(165deg, #FAFAFA 0%, #F0EDE8 100%)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 24 }}>
+      <div style={{ fontSize: 64, marginBottom: 20 }}>🔗</div>
+      <h2 style={{ fontSize: 22, fontWeight: 700, color: "#2D3436", marginBottom: 8 }}>הצטרף למשק בית</h2>
+      <p style={{ fontSize: 15, color: "#888", marginBottom: 28, fontWeight: 300 }}>הזן את קוד ההזמנה (6 תווים)</p>
+      <input value={joinCode} onChange={(e) => setJoinCode(e.target.value.toUpperCase())} onKeyDown={(e) => e.key === "Enter" && joinHousehold()}
+        placeholder="ABC123" maxLength={6} autoFocus
+        style={{ ...inputStyle, maxWidth: 200, fontSize: 24, textAlign: "center", letterSpacing: 6, fontWeight: 700, marginBottom: 14 }} />
+      {error && <p style={{ color: "#E53935", fontSize: 13, marginBottom: 10 }}>{error}</p>}
+      <div style={{ display: "flex", gap: 10, width: "100%", maxWidth: 300 }}>
+        <button onClick={() => { setMode(null); setError(""); }} style={{ ...btnBase, flex: 1, background: "#ccc" }}>← חזור</button>
+        <button onClick={joinHousehold} disabled={joinCode.trim().length !== 6 || loading} style={{ ...btnBase, flex: 2, background: joinCode.trim().length === 6 && !loading ? "linear-gradient(135deg, #8E44AD, #6C3483)" : "#ccc" }}>
+          {loading ? "מחפש..." : "הצטרף ✓"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ─── HomeScreen ───────────────────────────────────────────────────────────────
 
-function HomeScreen({ userName, onNavigate }) {
+function HomeScreen({ userName, householdName, inviteCode, onNavigate, onSwitchHousehold }) {
   const [moduleOrder, setModuleOrder] = useState(() => {
     try {
       const saved = localStorage.getItem("module-order");
@@ -238,8 +370,23 @@ function HomeScreen({ userName, onNavigate }) {
   return (
     <div dir="rtl" style={{ fontFamily: "'Rubik', sans-serif", maxWidth: 480, margin: "0 auto", minHeight: "100vh", background: "linear-gradient(165deg, #FAFAFA 0%, #F0EDE8 100%)" }}>
       <div style={{ background: "linear-gradient(135deg, #2D3436 0%, #636E72 100%)", padding: "36px 24px 28px", borderRadius: "0 0 32px 32px", boxShadow: "0 8px 32px rgba(0,0,0,0.12)", marginBottom: 24 }}>
-        <p style={{ margin: "0 0 6px", fontSize: 14, color: "rgba(255,255,255,0.55)", fontWeight: 300 }}>👋 שלום, {userName}</p>
-        <h1 style={{ margin: 0, fontSize: 28, fontWeight: 700, color: "#fff" }}>מה נפתח?</h1>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+          <div>
+            <p style={{ margin: "0 0 6px", fontSize: 14, color: "rgba(255,255,255,0.55)", fontWeight: 300 }}>👋 שלום, {userName}</p>
+            <h1 style={{ margin: 0, fontSize: 28, fontWeight: 700, color: "#fff" }}>מה נפתח?</h1>
+            {householdName && (
+              <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                <span style={{ fontSize: 13, color: "rgba(255,255,255,0.75)", fontWeight: 400 }}>🏠 {householdName}</span>
+                {inviteCode && <span style={{ fontSize: 12, color: "rgba(255,255,255,0.5)", background: "rgba(255,255,255,0.1)", borderRadius: 6, padding: "2px 8px", letterSpacing: 2, fontWeight: 600 }}>{inviteCode}</span>}
+              </div>
+            )}
+          </div>
+          {onSwitchHousehold && (
+            <button onClick={onSwitchHousehold} style={{ background: "rgba(255,255,255,0.12)", border: "none", borderRadius: 10, padding: "8px 12px", fontSize: 12, color: "rgba(255,255,255,0.75)", fontFamily: "inherit", cursor: "pointer", marginTop: 4 }}>
+              החלף 🔄
+            </button>
+          )}
+        </div>
       </div>
 
       <div ref={listRef} style={{ padding: "0 16px 32px", display: "flex", flexDirection: "column", gap: 12 }}>
@@ -294,7 +441,7 @@ function HomeScreen({ userName, onNavigate }) {
 
 // ─── ShoppingScreen ───────────────────────────────────────────────────────────
 
-function ShoppingScreen({ userName, onBack }) {
+function ShoppingScreen({ userName, householdId, onBack }) {
   const [items, setItems]   = useState([]);
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
@@ -314,10 +461,10 @@ function ShoppingScreen({ userName, onBack }) {
   const [pendingDelete, setPendingDelete] = useState(null);
 
   useEffect(() => {
-    const q = query(collection(db, "items"), orderBy("date", "desc"));
+    const q = query(collection(db, "households", householdId, "items"), orderBy("date", "desc"));
     const unsub = onSnapshot(q, (snap) => { setItems(snap.docs.map((d) => ({ id: d.id, ...d.data() }))); setLoading(false); });
     return () => unsub();
-  }, []);
+  }, [householdId]);
 
   useEffect(() => { localStorage.setItem("grocery-history", JSON.stringify(history)); }, [history]);
   useEffect(() => { if (showAdd && inputRef.current) inputRef.current.focus(); }, [showAdd]);
@@ -326,7 +473,7 @@ function ShoppingScreen({ userName, onBack }) {
     const name = inputValue.trim();
     if (!name) return;
     try {
-      await addDoc(collection(db, "items"), { name, priority, addedBy: userName, date: new Date().toISOString() });
+      await addDoc(collection(db, "households", householdId, "items"), { name, priority, addedBy: userName, date: new Date().toISOString() });
       if (!history.includes(name)) setHistory((p) => [...p, name]);
     } catch (e) { console.error("Error adding item:", e); }
     setInputValue(""); setPriority("yellow"); setShowAdd(false); setShowSuggestions(false);
@@ -334,7 +481,7 @@ function ShoppingScreen({ userName, onBack }) {
 
   const removeItem = (id, itemData) => {
     const timerId = setTimeout(async () => {
-      try { await deleteDoc(doc(db, "items", id)); } catch (e) { console.error(e); }
+      try { await deleteDoc(doc(db, "households", householdId, "items", id)); } catch (e) { console.error(e); }
       setPendingDelete(null);
     }, 4500);
     setPendingDelete({ id, item: itemData, timerId });
@@ -348,7 +495,7 @@ function ShoppingScreen({ userName, onBack }) {
   const closeEditItem = () => setEditingItem(null);
   const updateItem = async () => {
     if (!editItemName.trim()) return;
-    try { await updateDoc(doc(db, "items", editingItem.id), { name: editItemName.trim(), priority: editItemPriority }); closeEditItem(); }
+    try { await updateDoc(doc(db, "households", householdId, "items", editingItem.id), { name: editItemName.trim(), priority: editItemPriority }); closeEditItem(); }
     catch (e) { console.error("Error updating item:", e); }
   };
 
@@ -494,7 +641,7 @@ function ShoppingScreen({ userName, onBack }) {
 
 // ─── CouponsScreen ────────────────────────────────────────────────────────────
 
-function CouponsScreen({ userName, onBack }) {
+function CouponsScreen({ userName, householdId, onBack }) {
   const [coupons, setCoupons]   = useState([]);
   const [loading, setLoading]   = useState(true);
   const [showAdd, setShowAdd]   = useState(false);
@@ -527,10 +674,10 @@ function CouponsScreen({ userName, onBack }) {
   const editFileInputRef = useRef(null);
 
   useEffect(() => {
-    const q = query(collection(db, "coupons"), orderBy("date", "desc"));
+    const q = query(collection(db, "households", householdId, "coupons"), orderBy("date", "desc"));
     const unsub = onSnapshot(q, (snap) => { setCoupons(snap.docs.map((d) => ({ id: d.id, ...d.data() }))); setLoading(false); });
     return () => unsub();
-  }, []);
+  }, [householdId]);
 
   const handleFileChange = (e) => {
     const f = e.target.files[0];
@@ -559,7 +706,7 @@ function CouponsScreen({ userName, onBack }) {
         await uploadBytes(storageRef, file, { contentType: file.type });
         imageUrl = await getDownloadURL(storageRef);
       }
-      await addDoc(collection(db, "coupons"), { title: title.trim(), code: code.trim(), url: url.trim(), expiryDate, imageUrl, imagePath, fileType: file ? file.type : "", addedBy: userName, date: new Date().toISOString() });
+      await addDoc(collection(db, "households", householdId, "coupons"), { title: title.trim(), code: code.trim(), url: url.trim(), expiryDate, imageUrl, imagePath, fileType: file ? file.type : "", addedBy: userName, date: new Date().toISOString() });
       resetForm();
     } catch (e) { console.error("Error adding coupon:", e); }
     setUploading(false);
@@ -567,7 +714,7 @@ function CouponsScreen({ userName, onBack }) {
 
   const removeCoupon = (id, couponData) => {
     const timerId = setTimeout(async () => {
-      try { await deleteDoc(doc(db, "coupons", id)); } catch (e) { console.error(e); }
+      try { await deleteDoc(doc(db, "households", householdId, "coupons", id)); } catch (e) { console.error(e); }
       setPendingDelete(null);
     }, 4500);
     setPendingDelete({ id, coupon: couponData, timerId });
@@ -617,7 +764,7 @@ function CouponsScreen({ userName, onBack }) {
         await uploadBytes(storageRef, editFile, { contentType: editFile.type });
         imageUrl = await getDownloadURL(storageRef);
       }
-      await updateDoc(doc(db, "coupons", editingCoupon.id), {
+      await updateDoc(doc(db, "households", householdId, "coupons", editingCoupon.id), {
         title: editTitle.trim(),
         code: editCode.trim(),
         url: editUrl.trim(),
@@ -846,7 +993,7 @@ const INS_DARK    = "#0D47A1";
 const INS_BG      = "#E3F2FD";
 const INS_SHADOW  = "rgba(21,101,192,0.4)";
 
-function InsuranceScreen({ userName, onBack }) {
+function InsuranceScreen({ userName, householdId, onBack }) {
   const [docs, setDocs]               = useState([]);
   const [loading, setLoading]         = useState(true);
   const [showAdd, setShowAdd]         = useState(false);
@@ -875,10 +1022,10 @@ function InsuranceScreen({ userName, onBack }) {
   const MAX_FILE_SIZE = 5 * 1024 * 1024;
 
   useEffect(() => {
-    const q = query(collection(db, "insurance"), orderBy("date", "desc"));
+    const q = query(collection(db, "households", householdId, "insurance"), orderBy("date", "desc"));
     const unsub = onSnapshot(q, (snap) => { setDocs(snap.docs.map((d) => ({ id: d.id, ...d.data() }))); setLoading(false); });
     return () => unsub();
-  }, []);
+  }, [householdId]);
 
   const handleFileChange = (e) => {
     const f = e.target.files[0];
@@ -911,7 +1058,7 @@ function InsuranceScreen({ userName, onBack }) {
         await uploadBytes(sRef, file, { contentType: file.type });
         fileUrl = await getDownloadURL(sRef);
       }
-      await addDoc(collection(db, "insurance"), { title: title.trim(), comment: comment.trim(), startDate, endDate, fileUrl, filePath, fileType: file ? file.type : "", addedBy: userName, date: new Date().toISOString() });
+      await addDoc(collection(db, "households", householdId, "insurance"), { title: title.trim(), comment: comment.trim(), startDate, endDate, fileUrl, filePath, fileType: file ? file.type : "", addedBy: userName, date: new Date().toISOString() });
       resetForm();
     } catch (e) { console.error("Error saving insurance doc:", e); }
     setUploading(false);
@@ -919,7 +1066,7 @@ function InsuranceScreen({ userName, onBack }) {
 
   const removeInsDoc = (id, docData) => {
     const timerId = setTimeout(async () => {
-      try { await deleteDoc(doc(db, "insurance", id)); } catch (e) { console.error(e); }
+      try { await deleteDoc(doc(db, "households", householdId, "insurance", id)); } catch (e) { console.error(e); }
       setPendingDelete(null);
     }, 4500);
     setPendingDelete({ id, insDoc: docData, timerId });
@@ -949,7 +1096,7 @@ function InsuranceScreen({ userName, onBack }) {
         await uploadBytes(sRef, editFile, { contentType: editFile.type });
         fileUrl = await getDownloadURL(sRef);
       }
-      await updateDoc(doc(db, "insurance", editingDoc.id), { title: editTitle.trim(), comment: editComment.trim(), startDate: editStartDate, endDate: editEndDate, fileUrl, filePath, fileType: editFile ? editFile.type : (editingDoc.fileType || "") });
+      await updateDoc(doc(db, "households", householdId, "insurance", editingDoc.id), { title: editTitle.trim(), comment: editComment.trim(), startDate: editStartDate, endDate: editEndDate, fileUrl, filePath, fileType: editFile ? editFile.type : (editingDoc.fileType || "") });
       closeEdit();
     } catch (e) { console.error("Error updating insurance doc:", e); }
     setEditUploading(false);
@@ -1190,12 +1337,49 @@ function GlobalStyles() {
 
 // ─── Root ─────────────────────────────────────────────────────────────────────
 
+async function migrateExistingData(householdId) {
+  if (localStorage.getItem("grocery-migrated-v1")) return;
+  try {
+    for (const coll of ["items", "coupons", "insurance"]) {
+      const snap = await getDocs(collection(db, coll));
+      for (const docSnap of snap.docs) {
+        await setDoc(doc(db, "households", householdId, coll, docSnap.id), docSnap.data());
+      }
+    }
+    localStorage.setItem("grocery-migrated-v1", "true");
+  } catch (e) { console.error("Migration error:", e); }
+}
+
 export default function GroceryApp() {
-  const [userName, setUserName] = useState(() => localStorage.getItem("grocery-username") || "");
-  const [authReady, setAuthReady] = useState(false);
-  const [screen, setScreen] = useState("home");
+  const [userName,      setUserName]      = useState(() => localStorage.getItem("grocery-username")    || "");
+  const [householdId,   setHouseholdId]   = useState(() => localStorage.getItem("grocery-householdId") || "");
+  const [householdName, setHouseholdName] = useState(() => localStorage.getItem("grocery-householdName") || "");
+  const [inviteCode,    setInviteCode]    = useState("");
+  const [authReady,     setAuthReady]     = useState(false);
+  const [screen,        setScreen]        = useState("home");
 
   const saveName = (name) => { localStorage.setItem("grocery-username", name); setUserName(name); };
+
+  const saveHousehold = async (id, name) => {
+    setHouseholdId(id);
+    setHouseholdName(name);
+    // Fetch invite code to display in HomeScreen header
+    try {
+      const snap = await getDoc(doc(db, "households", id));
+      if (snap.exists()) setInviteCode(snap.data().inviteCode || "");
+    } catch {}
+    // Migrate existing flat data into the household (only runs once)
+    await migrateExistingData(id);
+  };
+
+  const switchHousehold = () => {
+    localStorage.removeItem("grocery-householdId");
+    localStorage.removeItem("grocery-householdName");
+    setHouseholdId("");
+    setHouseholdName("");
+    setInviteCode("");
+    setScreen("home");
+  };
 
   useEffect(() => {
     auth.authStateReady()
@@ -1204,11 +1388,28 @@ export default function GroceryApp() {
       .catch((e) => console.error("Auth error:", e));
   }, []);
 
-  if (!authReady) return <Loader />;
-  if (!userName)  return <NameSetup onSave={saveName} />;
+  // Load invite code on startup if household already set
+  useEffect(() => {
+    if (!householdId) return;
+    getDoc(doc(db, "households", householdId))
+      .then((snap) => { if (snap.exists()) setInviteCode(snap.data().inviteCode || ""); })
+      .catch(() => {});
+  }, [householdId]);
 
-  if (screen === "shopping")  return <ShoppingScreen  userName={userName} onBack={() => setScreen("home")} />;
-  if (screen === "coupons")   return <CouponsScreen   userName={userName} onBack={() => setScreen("home")} />;
-  if (screen === "insurance") return <InsuranceScreen userName={userName} onBack={() => setScreen("home")} />;
-  return <HomeScreen userName={userName} onNavigate={setScreen} />;
+  if (!authReady)    return <Loader />;
+  if (!userName)     return <NameSetup onSave={saveName} />;
+  if (!householdId)  return <HouseholdSetup userName={userName} onDone={saveHousehold} />;
+
+  if (screen === "shopping")  return <ShoppingScreen  userName={userName} householdId={householdId} onBack={() => setScreen("home")} />;
+  if (screen === "coupons")   return <CouponsScreen   userName={userName} householdId={householdId} onBack={() => setScreen("home")} />;
+  if (screen === "insurance") return <InsuranceScreen userName={userName} householdId={householdId} onBack={() => setScreen("home")} />;
+  return (
+    <HomeScreen
+      userName={userName}
+      householdName={householdName}
+      inviteCode={inviteCode}
+      onNavigate={setScreen}
+      onSwitchHousehold={switchHousehold}
+    />
+  );
 }
