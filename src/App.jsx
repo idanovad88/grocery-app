@@ -39,9 +39,10 @@ const USER_COLORS = [
 ];
 
 const MODULES = [
-  { id: "shopping", icon: "🛒", label: "רשימת קניות",      desc: "ניהול קניות משותף",          color: "#2D3436", bg: "#F0EDED", available: true  },
-  { id: "coupons",  icon: "🎟️", label: "שוברים",           desc: "שמירת שוברים והטבות",        color: "#8E44AD", bg: "#F5EEF8", available: true  },
-  { id: "receipts", icon: "🧾", label: "קבלות",            desc: "ארגון קבלות ותשלומים",       color: "#2980B9", bg: "#EBF5FB", available: false },
+  { id: "shopping",  icon: "🛒", label: "רשימת קניות",   desc: "ניהול קניות משותף",        color: "#2D3436", bg: "#F0EDED", available: true  },
+  { id: "coupons",   icon: "🎟️", label: "שוברים",        desc: "שמירת שוברים והטבות",      color: "#8E44AD", bg: "#F5EEF8", available: true  },
+  { id: "insurance", icon: "🛡️", label: "מסמכי ביטוח",  desc: "ניהול פוליסות וביטוחים",   color: "#1565C0", bg: "#E3F2FD", available: true  },
+  { id: "receipts",  icon: "🧾", label: "קבלות",         desc: "ארגון קבלות ותשלומים",     color: "#2980B9", bg: "#EBF5FB", available: false },
 ];
 
 // ─── Shared input style ───────────────────────────────────────────────────────
@@ -749,6 +750,316 @@ function CouponsScreen({ userName, onBack }) {
   );
 }
 
+// ─── InsuranceScreen ──────────────────────────────────────────────────────────
+
+const INS_BLUE    = "#1565C0";
+const INS_DARK    = "#0D47A1";
+const INS_BG      = "#E3F2FD";
+const INS_SHADOW  = "rgba(21,101,192,0.4)";
+
+function InsuranceScreen({ userName, onBack }) {
+  const [docs, setDocs]               = useState([]);
+  const [loading, setLoading]         = useState(true);
+  const [showAdd, setShowAdd]         = useState(false);
+  const [title, setTitle]             = useState("");
+  const [comment, setComment]         = useState("");
+  const [startDate, setStartDate]     = useState("");
+  const [endDate, setEndDate]         = useState("");
+  const [file, setFile]               = useState(null);
+  const [filePreview, setFilePreview] = useState(null);
+  const [uploading, setUploading]     = useState(false);
+  const [fileError, setFileError]     = useState(null);
+  const [pendingDelete, setPendingDelete] = useState(null);
+  const fileInputRef = useRef(null);
+
+  const [editingDoc, setEditingDoc]           = useState(null);
+  const [editTitle, setEditTitle]             = useState("");
+  const [editComment, setEditComment]         = useState("");
+  const [editStartDate, setEditStartDate]     = useState("");
+  const [editEndDate, setEditEndDate]         = useState("");
+  const [editFile, setEditFile]               = useState(null);
+  const [editFilePreview, setEditFilePreview] = useState(null);
+  const [editUploading, setEditUploading]     = useState(false);
+  const [editFileError, setEditFileError]     = useState(null);
+  const editFileInputRef = useRef(null);
+
+  const MAX_FILE_SIZE = 5 * 1024 * 1024;
+
+  useEffect(() => {
+    const q = query(collection(db, "insurance"), orderBy("date", "desc"));
+    const unsub = onSnapshot(q, (snap) => { setDocs(snap.docs.map((d) => ({ id: d.id, ...d.data() }))); setLoading(false); });
+    return () => unsub();
+  }, []);
+
+  const handleFileChange = (e) => {
+    const f = e.target.files[0];
+    if (!f) return;
+    if (f.size > MAX_FILE_SIZE) { setFileError(`הקובץ גדול מדי (${(f.size/1024/1024).toFixed(1)}MB) — מקסימום 5MB`); e.target.value = ""; return; }
+    setFileError(null); setFile(f);
+    if (f.type.startsWith("image/")) { const r = new FileReader(); r.onload = (ev) => setFilePreview(ev.target.result); r.readAsDataURL(f); }
+    else setFilePreview("pdf");
+  };
+
+  const handleEditFileChange = (e) => {
+    const f = e.target.files[0];
+    if (!f) return;
+    if (f.size > MAX_FILE_SIZE) { setEditFileError(`הקובץ גדול מדי (${(f.size/1024/1024).toFixed(1)}MB) — מקסימום 5MB`); e.target.value = ""; return; }
+    setEditFileError(null); setEditFile(f);
+    if (f.type.startsWith("image/")) { const r = new FileReader(); r.onload = (ev) => setEditFilePreview(ev.target.result); r.readAsDataURL(f); }
+    else setEditFilePreview("pdf");
+  };
+
+  const resetForm = () => { setTitle(""); setComment(""); setStartDate(""); setEndDate(""); setFile(null); setFilePreview(null); setFileError(null); setShowAdd(false); };
+
+  const saveDoc = async () => {
+    if (!title.trim()) return;
+    setUploading(true);
+    try {
+      let fileUrl = "", filePath = "";
+      if (file) {
+        filePath = `insurance/${Date.now()}_${file.name}`;
+        const sRef = ref(storage, filePath);
+        await uploadBytes(sRef, file, { contentType: file.type });
+        fileUrl = await getDownloadURL(sRef);
+      }
+      await addDoc(collection(db, "insurance"), { title: title.trim(), comment: comment.trim(), startDate, endDate, fileUrl, filePath, fileType: file ? file.type : "", addedBy: userName, date: new Date().toISOString() });
+      resetForm();
+    } catch (e) { console.error("Error saving insurance doc:", e); }
+    setUploading(false);
+  };
+
+  const removeInsDoc = (id, docData) => {
+    const timerId = setTimeout(async () => {
+      try { await deleteDoc(doc(db, "insurance", id)); } catch (e) { console.error(e); }
+      setPendingDelete(null);
+    }, 4500);
+    setPendingDelete({ id, insDoc: docData, timerId });
+  };
+
+  const undoDelete = () => { if (pendingDelete) { clearTimeout(pendingDelete.timerId); setPendingDelete(null); } };
+
+  const openEdit = (d) => {
+    setEditingDoc(d);
+    setEditTitle(d.title || ""); setEditComment(d.comment || "");
+    setEditStartDate(d.startDate || ""); setEditEndDate(d.endDate || "");
+    setEditFile(null);
+    setEditFilePreview(d.fileUrl ? (d.fileType === "application/pdf" ? "pdf" : d.fileUrl) : null);
+  };
+
+  const closeEdit = () => { setEditingDoc(null); setEditFile(null); setEditFilePreview(null); setEditFileError(null); };
+
+  const saveEditDoc = async () => {
+    if (!editTitle.trim()) return;
+    setEditUploading(true);
+    try {
+      let fileUrl  = editingDoc.fileUrl  || "";
+      let filePath = editingDoc.filePath || "";
+      if (editFile) {
+        filePath = `insurance/${Date.now()}_${editFile.name}`;
+        const sRef = ref(storage, filePath);
+        await uploadBytes(sRef, editFile, { contentType: editFile.type });
+        fileUrl = await getDownloadURL(sRef);
+      }
+      await updateDoc(doc(db, "insurance", editingDoc.id), { title: editTitle.trim(), comment: editComment.trim(), startDate: editStartDate, endDate: editEndDate, fileUrl, filePath, fileType: editFile ? editFile.type : (editingDoc.fileType || "") });
+      closeEdit();
+    } catch (e) { console.error("Error updating insurance doc:", e); }
+    setEditUploading(false);
+  };
+
+  const sorted = [...docs]
+    .filter((d) => d.id !== pendingDelete?.id)
+    .sort((a, b) => {
+      const rank = (d) => { if (!d.endDate) return 2; const diff = new Date(d.endDate) - new Date(); return diff < 0 ? 3 : diff < 2592000000 ? 1 : 2; };
+      return rank(a) - rank(b);
+    });
+
+  const FileAttachArea = ({ preview, isPdf, onClear, onPick, inputRef, onChange, error, existingName }) => (
+    <div style={{ marginTop: 10 }}>
+      <input ref={inputRef} type="file" accept="image/*,application/pdf" onChange={onChange} style={{ display: "none" }} />
+      {preview ? (
+        <div style={{ position: "relative" }}>
+          {isPdf || preview === "pdf"
+            ? <div style={{ background: INS_BG, borderRadius: 12, padding: 16, textAlign: "center", color: INS_BLUE, fontSize: 14 }}>📄 {existingName || "קובץ מצורף"}</div>
+            : <img src={preview} alt="preview" style={{ width: "100%", borderRadius: 12, maxHeight: 160, objectFit: "cover" }} />
+          }
+          <button onClick={onClear} style={{ position: "absolute", top: 8, left: 8, background: "rgba(0,0,0,0.5)", color: "#fff", border: "none", borderRadius: "50%", width: 28, height: 28, cursor: "pointer", fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
+        </div>
+      ) : (
+        <button onClick={onPick}
+          style={{ width: "100%", border: `2px dashed ${error ? "#E53935" : "#E8E5E0"}`, background: error ? "#FFF5F5" : "#FAFAFA", borderRadius: 12, padding: 16, cursor: "pointer", fontSize: 14, color: error ? "#E53935" : "#AAA", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+          📎 צרף מסמך ביטוח — PDF או תמונה
+        </button>
+      )}
+      {error && <p style={{ margin: "6px 0 0", fontSize: 12, color: "#E53935", fontWeight: 500 }}>⚠️ {error}</p>}
+    </div>
+  );
+
+  if (loading) return <Loader />;
+
+  return (
+    <div dir="rtl" style={{ fontFamily: "'Rubik', sans-serif", maxWidth: 480, margin: "0 auto", minHeight: "100vh", background: "linear-gradient(165deg, #FAFAFA 0%, #F0EDE8 100%)", position: "relative" }}>
+      {/* Header */}
+      <div style={{ background: `linear-gradient(135deg, ${INS_BLUE} 0%, ${INS_DARK} 100%)`, padding: "28px 24px 20px", borderRadius: "0 0 28px 28px", boxShadow: "0 8px 32px rgba(21,101,192,0.25)" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div>
+            <h1 style={{ margin: 0, fontSize: 26, fontWeight: 700, color: "#fff" }}>🛡️ מסמכי ביטוח</h1>
+            <p style={{ margin: "4px 0 0", fontSize: 13, color: "rgba(255,255,255,0.6)", fontWeight: 300 }}>{docs.length} מסמכים שמורים</p>
+          </div>
+          <BackButton onBack={onBack} light />
+        </div>
+      </div>
+
+      <div style={{ padding: "16px 16px 100px" }}>
+        {/* Add form */}
+        {showAdd && (
+          <div style={{ background: "#fff", borderRadius: 20, padding: 20, marginBottom: 16, boxShadow: "0 4px 20px rgba(0,0,0,0.08)", animation: "slideDown 0.3s ease" }}>
+            <h3 style={{ margin: "0 0 16px", fontSize: 16, fontWeight: 600, color: "#2D3436" }}>מסמך חדש</h3>
+
+            <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="שם המסמך / סוג הביטוח *"
+              style={inputStyle} onFocus={(e) => (e.target.style.borderColor = INS_BLUE)} onBlur={(e) => (e.target.style.borderColor = "#E8E5E0")} />
+
+            <textarea value={comment} onChange={(e) => setComment(e.target.value)} placeholder="הערה (אופציונלי)" rows={2}
+              style={{ ...inputStyle, marginTop: 10, resize: "vertical", lineHeight: 1.5 }}
+              onFocus={(e) => (e.target.style.borderColor = INS_BLUE)} onBlur={(e) => (e.target.style.borderColor = "#E8E5E0")} />
+
+            <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
+              <div style={{ flex: 1 }}>
+                <p style={{ margin: "0 0 6px", fontSize: 13, color: "#888" }}>תחילת ביטוח</p>
+                <input value={startDate} onChange={(e) => setStartDate(e.target.value)} type="date"
+                  style={{ ...inputStyle, color: startDate ? "#2D3436" : "#CCC" }}
+                  onFocus={(e) => (e.target.style.borderColor = INS_BLUE)} onBlur={(e) => (e.target.style.borderColor = "#E8E5E0")} />
+              </div>
+              <div style={{ flex: 1 }}>
+                <p style={{ margin: "0 0 6px", fontSize: 13, color: "#888" }}>סיום ביטוח</p>
+                <input value={endDate} onChange={(e) => setEndDate(e.target.value)} type="date"
+                  style={{ ...inputStyle, color: endDate ? "#2D3436" : "#CCC" }}
+                  onFocus={(e) => (e.target.style.borderColor = INS_BLUE)} onBlur={(e) => (e.target.style.borderColor = "#E8E5E0")} />
+              </div>
+            </div>
+
+            <FileAttachArea preview={filePreview} isPdf={false} onClear={() => { setFile(null); setFilePreview(null); }} onPick={() => fileInputRef.current.click()} inputRef={fileInputRef} onChange={handleFileChange} error={fileError} existingName={file?.name} />
+
+            <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
+              <button onClick={saveDoc} disabled={!title.trim() || uploading}
+                style={{ flex: 1, border: "none", background: title.trim() && !uploading ? `linear-gradient(135deg, ${INS_BLUE}, ${INS_DARK})` : "#ccc", color: "#fff", borderRadius: 12, padding: "14px", fontSize: 15, fontWeight: 600, fontFamily: "inherit", cursor: title.trim() && !uploading ? "pointer" : "default" }}>
+                {uploading ? "מעלה..." : "שמור מסמך ✓"}
+              </button>
+              <button onClick={resetForm} style={{ border: "2px solid #E8E5E0", background: "#fff", color: "#999", borderRadius: 12, padding: "14px 20px", fontSize: 15, fontFamily: "inherit", cursor: "pointer" }}>✕</button>
+            </div>
+          </div>
+        )}
+
+        {sorted.length === 0 && !showAdd && (
+          <div style={{ textAlign: "center", padding: "60px 20px" }}>
+            <div style={{ fontSize: 56, marginBottom: 16 }}>🛡️</div>
+            <p style={{ fontSize: 18, color: "#999", fontWeight: 300 }}>אין מסמכי ביטוח</p>
+            <p style={{ fontSize: 14, color: "#CCC", fontWeight: 300, marginTop: 4 }}>לחצו על + כדי להוסיף מסמך</p>
+          </div>
+        )}
+
+        {sorted.length > 0 && <p style={{ textAlign: "center", fontSize: 12, color: "#BBB", margin: "8px 0 12px", fontWeight: 300 }}>עריכה → | ← מחיקה</p>}
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {sorted.map((insDoc) => {
+            const expiry    = getExpiryStatus(insDoc.endDate);
+            const uc        = getUserColor(insDoc.addedBy);
+            const isPdf     = insDoc.fileType === "application/pdf" || insDoc.filePath?.toLowerCase().endsWith(".pdf");
+            const isExpired = expiry && new Date(insDoc.endDate) < new Date();
+            return (
+              <SwipeItem key={insDoc.id} borderRadius={18} onSwipeLeft={() => removeInsDoc(insDoc.id, insDoc)} onSwipeRight={() => openEdit(insDoc)}>
+                <div style={{ background: "#fff", borderRadius: 18, overflow: "hidden", boxShadow: "0 2px 12px rgba(0,0,0,0.06)", opacity: isExpired ? 0.65 : 1, borderRight: `4px solid ${INS_BLUE}` }}>
+                  {insDoc.fileUrl && (
+                    isPdf ? (
+                      <a href={insDoc.fileUrl} target="_blank" rel="noopener noreferrer"
+                        style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, height: 64, background: INS_BG, textDecoration: "none" }}>
+                        <span style={{ fontSize: 22 }}>📄</span>
+                        <span style={{ color: INS_BLUE, fontWeight: 600, fontSize: 14 }}>פתח מסמך PDF</span>
+                        <span style={{ fontSize: 12, color: "#90CAF9" }}>↗</span>
+                      </a>
+                    ) : (
+                      <img src={insDoc.fileUrl} alt={insDoc.title} style={{ width: "100%", height: 120, objectFit: "cover" }} />
+                    )
+                  )}
+                  <div style={{ padding: "14px 16px" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+                      <p style={{ margin: 0, fontSize: 16, fontWeight: 600, color: "#2D3436", flex: 1 }}>🛡️ {insDoc.title}</p>
+                      {expiry && <span style={{ fontSize: 11, fontWeight: 600, color: expiry.color, background: expiry.bg, padding: "3px 8px", borderRadius: 8, flexShrink: 0 }}>⏱ {expiry.label}</span>}
+                    </div>
+                    {insDoc.comment && <p style={{ margin: "8px 0 0", fontSize: 13, color: "#555", lineHeight: 1.5 }}>{insDoc.comment}</p>}
+                    {(insDoc.startDate || insDoc.endDate) && (
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 8, fontSize: 12, color: "#888" }}>
+                        <span>📅</span>
+                        {insDoc.startDate && <span>{insDoc.startDate.split("-").reverse().join("/")}</span>}
+                        {insDoc.startDate && insDoc.endDate && <span style={{ color: "#CCC" }}>—</span>}
+                        {insDoc.endDate && <span>{insDoc.endDate.split("-").reverse().join("/")}</span>}
+                      </div>
+                    )}
+                    <div style={{ display: "flex", gap: 12, marginTop: 8, alignItems: "center" }}>
+                      <span style={{ fontSize: 11, color: "#CCC" }}>🕐 {formatDate(insDoc.date)}</span>
+                      <span style={{ fontSize: 11, color: uc.color, fontWeight: 500 }}>👤 {insDoc.addedBy}</span>
+                    </div>
+                  </div>
+                </div>
+              </SwipeItem>
+            );
+          })}
+        </div>
+      </div>
+
+      {!showAdd && <FAB onClick={() => setShowAdd(true)} color={`linear-gradient(135deg, ${INS_BLUE}, ${INS_DARK})`} shadow={INS_SHADOW} />}
+
+      {/* Undo Delete Toast */}
+      {pendingDelete && (
+        <div style={{ position: "fixed", bottom: 104, left: "50%", transform: "translateX(-50%)", background: "#2D3436", color: "#fff", borderRadius: 14, padding: "12px 18px", display: "flex", alignItems: "center", gap: 14, zIndex: 60, boxShadow: "0 6px 24px rgba(0,0,0,0.3)", whiteSpace: "nowrap", animation: "slideUp 0.25s ease" }}>
+          <span style={{ fontSize: 14 }}>🗑️ "{pendingDelete.insDoc.title}" נמחק</span>
+          <button onClick={undoDelete} style={{ background: INS_BLUE, border: "none", borderRadius: 8, padding: "6px 14px", color: "#fff", fontSize: 13, fontWeight: 600, fontFamily: "inherit", cursor: "pointer" }}>ביטול</button>
+        </div>
+      )}
+
+      {/* Edit Modal */}
+      {editingDoc && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 100, display: "flex", alignItems: "flex-end", justifyContent: "center" }} onClick={(e) => { if (e.target === e.currentTarget) closeEdit(); }}>
+          <div dir="rtl" style={{ background: "#fff", borderRadius: "24px 24px 0 0", padding: 24, width: "100%", maxWidth: 480, maxHeight: "90vh", overflowY: "auto", animation: "slideUp 0.3s ease" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+              <h3 style={{ margin: 0, fontSize: 17, fontWeight: 600, color: "#2D3436" }}>✏️ עריכת מסמך</h3>
+              <button onClick={closeEdit} style={{ background: "none", border: "none", fontSize: 22, cursor: "pointer", color: "#999", lineHeight: 1 }}>✕</button>
+            </div>
+            <input value={editTitle} onChange={(e) => setEditTitle(e.target.value)} placeholder="שם המסמך / סוג הביטוח *"
+              style={inputStyle} onFocus={(e) => (e.target.style.borderColor = INS_BLUE)} onBlur={(e) => (e.target.style.borderColor = "#E8E5E0")} />
+            <textarea value={editComment} onChange={(e) => setEditComment(e.target.value)} placeholder="הערה (אופציונלי)" rows={2}
+              style={{ ...inputStyle, marginTop: 10, resize: "vertical", lineHeight: 1.5 }}
+              onFocus={(e) => (e.target.style.borderColor = INS_BLUE)} onBlur={(e) => (e.target.style.borderColor = "#E8E5E0")} />
+            <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
+              <div style={{ flex: 1 }}>
+                <p style={{ margin: "0 0 6px", fontSize: 13, color: "#888" }}>תחילת ביטוח</p>
+                <input value={editStartDate} onChange={(e) => setEditStartDate(e.target.value)} type="date"
+                  style={{ ...inputStyle, color: editStartDate ? "#2D3436" : "#CCC" }}
+                  onFocus={(e) => (e.target.style.borderColor = INS_BLUE)} onBlur={(e) => (e.target.style.borderColor = "#E8E5E0")} />
+              </div>
+              <div style={{ flex: 1 }}>
+                <p style={{ margin: "0 0 6px", fontSize: 13, color: "#888" }}>סיום ביטוח</p>
+                <input value={editEndDate} onChange={(e) => setEditEndDate(e.target.value)} type="date"
+                  style={{ ...inputStyle, color: editEndDate ? "#2D3436" : "#CCC" }}
+                  onFocus={(e) => (e.target.style.borderColor = INS_BLUE)} onBlur={(e) => (e.target.style.borderColor = "#E8E5E0")} />
+              </div>
+            </div>
+            <FileAttachArea preview={editFilePreview} isPdf={editFilePreview === "pdf"} onClear={() => { setEditFile(null); setEditFilePreview(null); }} onPick={() => editFileInputRef.current.click()} inputRef={editFileInputRef} onChange={handleEditFileChange} error={editFileError} existingName={editFile?.name} />
+            <div style={{ display: "flex", gap: 8, marginTop: 16, paddingBottom: 8 }}>
+              <button onClick={saveEditDoc} disabled={!editTitle.trim() || editUploading}
+                style={{ flex: 1, border: "none", background: editTitle.trim() && !editUploading ? `linear-gradient(135deg, ${INS_BLUE}, ${INS_DARK})` : "#ccc", color: "#fff", borderRadius: 12, padding: "14px", fontSize: 15, fontWeight: 600, fontFamily: "inherit", cursor: editTitle.trim() && !editUploading ? "pointer" : "default" }}>
+                {editUploading ? "שומר..." : "שמור שינויים ✓"}
+              </button>
+              <button onClick={closeEdit} style={{ border: "2px solid #E8E5E0", background: "#fff", color: "#999", borderRadius: 12, padding: "14px 20px", fontSize: 15, fontFamily: "inherit", cursor: "pointer" }}>✕</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <GlobalStyles />
+    </div>
+  );
+}
+
 // ─── Shared micro-components ──────────────────────────────────────────────────
 
 function Loader() {
@@ -807,7 +1118,8 @@ export default function GroceryApp() {
   if (!authReady) return <Loader />;
   if (!userName)  return <NameSetup onSave={saveName} />;
 
-  if (screen === "shopping") return <ShoppingScreen userName={userName} onBack={() => setScreen("home")} />;
-  if (screen === "coupons")  return <CouponsScreen  userName={userName} onBack={() => setScreen("home")} />;
+  if (screen === "shopping")  return <ShoppingScreen  userName={userName} onBack={() => setScreen("home")} />;
+  if (screen === "coupons")   return <CouponsScreen   userName={userName} onBack={() => setScreen("home")} />;
+  if (screen === "insurance") return <InsuranceScreen userName={userName} onBack={() => setScreen("home")} />;
   return <HomeScreen userName={userName} onNavigate={setScreen} />;
 }
