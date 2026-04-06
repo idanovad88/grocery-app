@@ -172,6 +172,69 @@ function NameSetup({ onSave }) {
 // ─── HomeScreen ───────────────────────────────────────────────────────────────
 
 function HomeScreen({ userName, onNavigate }) {
+  const [moduleOrder, setModuleOrder] = useState(() => {
+    try {
+      const saved = localStorage.getItem("module-order");
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        const ids = MODULES.map(m => m.id);
+        const valid = parsed.filter(id => ids.includes(id));
+        const missing = ids.filter(id => !valid.includes(id));
+        return [...valid, ...missing];
+      }
+    } catch {}
+    return MODULES.map(m => m.id);
+  });
+
+  const [dragIndex, setDragIndex] = useState(null);
+  const [overIndex, setOverIndex] = useState(null);
+  const [dragY, setDragY]         = useState(0);
+  const listRef = useRef(null);
+  const pRef    = useRef({ active: false, startY: 0, startIdx: 0, itemH: 88 });
+
+  const orderedModules = moduleOrder.map(id => MODULES.find(m => m.id === id)).filter(Boolean);
+
+  const handleDragStart = (e, index) => {
+    e.preventDefault();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    if (listRef.current?.children[index]) {
+      pRef.current.itemH = listRef.current.children[index].offsetHeight + 12;
+    }
+    pRef.current = { ...pRef.current, active: true, startY: e.clientY, startIdx: index };
+    setDragIndex(index); setOverIndex(index); setDragY(0);
+  };
+
+  const handleDragMove = (e) => {
+    if (!pRef.current.active) return;
+    const dy = e.clientY - pRef.current.startY;
+    setDragY(dy);
+    const moved   = Math.round(dy / pRef.current.itemH);
+    const newOver = Math.max(0, Math.min(orderedModules.length - 1, pRef.current.startIdx + moved));
+    setOverIndex(newOver);
+  };
+
+  const handleDragEnd = () => {
+    if (!pRef.current.active) return;
+    pRef.current.active = false;
+    const from = pRef.current.startIdx;
+    if (overIndex !== null && overIndex !== from) {
+      const newOrder = [...moduleOrder];
+      const [item] = newOrder.splice(from, 1);
+      newOrder.splice(overIndex, 0, item);
+      setModuleOrder(newOrder);
+      localStorage.setItem("module-order", JSON.stringify(newOrder));
+    }
+    setDragIndex(null); setOverIndex(null); setDragY(0);
+  };
+
+  const getShift = (i) => {
+    if (dragIndex === null || overIndex === null || i === dragIndex) return 0;
+    const h = pRef.current.itemH;
+    if (dragIndex < overIndex && i > dragIndex && i <= overIndex) return -h;
+    if (dragIndex > overIndex && i >= overIndex && i < dragIndex) return  h;
+    return 0;
+  };
+
   return (
     <div dir="rtl" style={{ fontFamily: "'Rubik', sans-serif", maxWidth: 480, margin: "0 auto", minHeight: "100vh", background: "linear-gradient(165deg, #FAFAFA 0%, #F0EDE8 100%)" }}>
       <div style={{ background: "linear-gradient(135deg, #2D3436 0%, #636E72 100%)", padding: "36px 24px 28px", borderRadius: "0 0 32px 32px", boxShadow: "0 8px 32px rgba(0,0,0,0.12)", marginBottom: 24 }}>
@@ -179,25 +242,51 @@ function HomeScreen({ userName, onNavigate }) {
         <h1 style={{ margin: 0, fontSize: 28, fontWeight: 700, color: "#fff" }}>מה נפתח?</h1>
       </div>
 
-      <div style={{ padding: "0 16px 32px", display: "flex", flexDirection: "column", gap: 12 }}>
-        {MODULES.map((mod) => (
-          <button
-            key={mod.id}
-            onClick={() => mod.available && onNavigate(mod.id)}
-            style={{ display: "flex", alignItems: "center", gap: 16, background: "#fff", border: "none", borderRadius: 20, padding: "20px", textAlign: "right", cursor: mod.available ? "pointer" : "default", boxShadow: "0 2px 12px rgba(0,0,0,0.06)", opacity: mod.available ? 1 : 0.5, transition: "transform 0.15s, box-shadow 0.15s", fontFamily: "inherit", width: "100%" }}
-            onMouseEnter={(e) => { if (mod.available) { e.currentTarget.style.transform = "translateY(-2px)"; e.currentTarget.style.boxShadow = "0 6px 20px rgba(0,0,0,0.1)"; } }}
-            onMouseLeave={(e) => { e.currentTarget.style.transform = "translateY(0)"; e.currentTarget.style.boxShadow = "0 2px 12px rgba(0,0,0,0.06)"; }}
-          >
-            <div style={{ width: 58, height: 58, borderRadius: 16, background: mod.bg, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 28, flexShrink: 0 }}>
-              {mod.icon}
+      <div ref={listRef} style={{ padding: "0 16px 32px", display: "flex", flexDirection: "column", gap: 12 }}>
+        {orderedModules.map((mod, index) => {
+          const isDragging = dragIndex === index;
+          const shift      = getShift(index);
+          return (
+            <div
+              key={mod.id}
+              style={{
+                display: "flex", alignItems: "center",
+                background: "#fff", borderRadius: 20,
+                boxShadow: isDragging ? "0 16px 48px rgba(0,0,0,0.18)" : "0 2px 12px rgba(0,0,0,0.06)",
+                opacity: mod.available ? 1 : 0.5,
+                transform: isDragging ? `translateY(${dragY}px) scale(1.02)` : `translateY(${shift}px)`,
+                transition: isDragging ? "box-shadow 0.15s" : "transform 0.2s ease, box-shadow 0.15s",
+                zIndex: isDragging ? 10 : 1,
+                position: "relative",
+              }}
+            >
+              {/* ── Drag handle ── */}
+              <div
+                onPointerDown={(e) => handleDragStart(e, index)}
+                onPointerMove={handleDragMove}
+                onPointerUp={handleDragEnd}
+                onPointerCancel={handleDragEnd}
+                style={{ padding: "24px 6px 24px 18px", cursor: dragIndex !== null ? "grabbing" : "grab", touchAction: "none", userSelect: "none", color: "#CECECE", fontSize: 18, flexShrink: 0, lineHeight: 1 }}
+              >
+                ⠿
+              </div>
+              {/* ── Card content ── */}
+              <div
+                onClick={() => mod.available && onNavigate(mod.id)}
+                style={{ flex: 1, display: "flex", alignItems: "center", gap: 16, padding: "20px 20px 20px 0", cursor: mod.available ? "pointer" : "default" }}
+              >
+                <div style={{ width: 58, height: 58, borderRadius: 16, background: mod.bg, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 28, flexShrink: 0 }}>
+                  {mod.icon}
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 17, fontWeight: 600, color: "#2D3436", marginBottom: 3 }}>{mod.label}</div>
+                  <div style={{ fontSize: 13, color: "#AAA", fontWeight: 300 }}>{mod.available ? mod.desc : "בקרוב..."}</div>
+                </div>
+                {mod.available && <div style={{ color: "#CCC", fontSize: 20 }}>‹</div>}
+              </div>
             </div>
-            <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 17, fontWeight: 600, color: "#2D3436", marginBottom: 3 }}>{mod.label}</div>
-              <div style={{ fontSize: 13, color: "#AAA", fontWeight: 300 }}>{mod.available ? mod.desc : "בקרוב..."}</div>
-            </div>
-            {mod.available && <div style={{ color: "#CCC", fontSize: 20, marginLeft: 4 }}>‹</div>}
-          </button>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
