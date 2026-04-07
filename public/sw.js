@@ -18,5 +18,9 @@ self.clients.claim();
 });
 
 self.addEventListener("fetch", (event) => {
-event.respondWith(fetch(event.request));
+  // Only handle same-origin requests to avoid dev server issues
+  if (!event.request.url.startsWith(self.location.origin)) return;
+  event.respondWith(
+    fetch(event.request).catch(() => new Response("", { status: 503, statusText: "Service Unavailable" }))
+  );
 });

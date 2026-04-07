@@ -175,7 +175,7 @@ function NameSetup({ onSave }) {
 
 // ─── HouseholdSetup ───────────────────────────────────────────────────────────
 
-function HouseholdSetup({ userName, onDone }) {
+function HouseholdSetup({ userName, onDone, onCancel }) {
   const [mode, setMode]         = useState(null); // "create" | "join"
   const [name, setName]         = useState("");
   const [joinCode, setJoinCode] = useState("");
@@ -189,13 +189,17 @@ function HouseholdSetup({ userName, onDone }) {
     if (!name.trim()) return;
     setLoading(true); setError("");
     try {
+      if (!auth.currentUser) await signInAnonymously(auth);
       const inviteCode = generateCode();
       const newRef = doc(collection(db, "households"));
       await setDoc(newRef, { name: name.trim(), inviteCode, createdBy: userName, createdAt: new Date().toISOString() });
       setCreatedCode(inviteCode);
       setCreatedId(newRef.id);
       setCreatedName(name.trim());
-    } catch (e) { setError("שגיאה ביצירת משק הבית. נסה שוב."); console.error(e); }
+    } catch (e) {
+      console.error("Create household error:", e);
+      setError(e?.code || e?.message || "שגיאה ביצירת משק הבית. נסה שוב.");
+    }
     setLoading(false);
   };
 
@@ -210,12 +214,11 @@ function HouseholdSetup({ userName, onDone }) {
     if (code.length !== 6) { setError("הזן קוד בן 6 תווים"); return; }
     setLoading(true); setError("");
     try {
+      if (!auth.currentUser) await signInAnonymously(auth);
       const q = query(collection(db, "households"), where("inviteCode", "==", code));
       const snap = await getDocs(q);
       if (snap.empty) { setError("קוד לא נמצא. בדוק שוב."); setLoading(false); return; }
       const hDoc = snap.docs[0];
-      localStorage.setItem("grocery-householdId", hDoc.id);
-      localStorage.setItem("grocery-householdName", hDoc.data().name);
       onDone(hDoc.id, hDoc.data().name);
     } catch (e) { setError("שגיאה בחיבור. נסה שוב."); console.error(e); }
     setLoading(false);
@@ -255,6 +258,11 @@ function HouseholdSetup({ userName, onDone }) {
           <button onClick={() => setMode("join")} style={{ ...btnBase, background: "linear-gradient(135deg, #8E44AD, #6C3483)" }}>
             🔗 הצטרף למשק בית קיים
           </button>
+          {onCancel && (
+            <button onClick={onCancel} style={{ ...btnBase, background: "transparent", color: "#888", border: "1px solid #DDD" }}>
+              ← חזור לרשימה
+            </button>
+          )}
         </div>
       </div>
     );
@@ -295,6 +303,70 @@ function HouseholdSetup({ userName, onDone }) {
         <button onClick={() => { setMode(null); setError(""); }} style={{ ...btnBase, flex: 1, background: "#ccc" }}>← חזור</button>
         <button onClick={joinHousehold} disabled={joinCode.trim().length !== 6 || loading} style={{ ...btnBase, flex: 2, background: joinCode.trim().length === 6 && !loading ? "linear-gradient(135deg, #8E44AD, #6C3483)" : "#ccc" }}>
           {loading ? "מחפש..." : "הצטרף ✓"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ─── HouseholdPickerScreen ────────────────────────────────────────────────────
+
+function HouseholdPickerScreen({ userName, households, onSelect, onAddHousehold }) {
+  const HOUSE_COLORS = [
+    { bg: "#E3F2FD", icon: "#1565C0" },
+    { bg: "#F3E5F5", icon: "#6A1B9A" },
+    { bg: "#E8F5E9", icon: "#2E7D32" },
+    { bg: "#FFF3E0", icon: "#E65100" },
+    { bg: "#FCE4EC", icon: "#880E4F" },
+  ];
+
+  return (
+    <div dir="rtl" style={{ fontFamily: "'Rubik', sans-serif", maxWidth: 480, margin: "0 auto", minHeight: "100vh", background: "linear-gradient(165deg, #FAFAFA 0%, #F0EDE8 100%)" }}>
+      {/* Header */}
+      <div style={{ background: "linear-gradient(135deg, #2D3436 0%, #636E72 100%)", padding: "48px 24px 32px", borderRadius: "0 0 32px 32px", boxShadow: "0 8px 32px rgba(0,0,0,0.12)", marginBottom: 24 }}>
+        <p style={{ margin: "0 0 6px", fontSize: 14, color: "rgba(255,255,255,0.55)", fontWeight: 300 }}>👋 שלום, {userName}</p>
+        <h1 style={{ margin: 0, fontSize: 28, fontWeight: 700, color: "#fff" }}>הבתים שלי</h1>
+        <p style={{ margin: "8px 0 0", fontSize: 14, color: "rgba(255,255,255,0.6)", fontWeight: 300 }}>בחר משק בית להיכנס אליו</p>
+      </div>
+
+      {/* List */}
+      <div style={{ padding: "0 16px 32px" }}>
+        {households.map((h, i) => {
+          const col = HOUSE_COLORS[i % HOUSE_COLORS.length];
+          return (
+            <div
+              key={h.id}
+              onClick={() => onSelect(h.id, h.name)}
+              style={{
+                background: "#fff", borderRadius: 20, padding: "18px 20px", marginBottom: 12,
+                boxShadow: "0 2px 12px rgba(0,0,0,0.06)", cursor: "pointer",
+                display: "flex", alignItems: "center", gap: 16,
+              }}
+            >
+              <div style={{ width: 52, height: 52, borderRadius: 16, background: col.bg, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 26 }}>🏠</div>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 17, fontWeight: 600, color: "#2D3436" }}>{h.name}</div>
+                <div style={{ fontSize: 13, color: "#AAA", marginTop: 2 }}>לחץ להיכנס</div>
+              </div>
+              <div style={{ color: "#CCC", fontSize: 22 }}>‹</div>
+            </div>
+          );
+        })}
+
+        {/* Add household */}
+        <button
+          onClick={onAddHousehold}
+          style={{
+            width: "100%", border: "2px dashed #D5D0CA", background: "transparent",
+            borderRadius: 20, padding: "18px 20px", cursor: "pointer",
+            display: "flex", alignItems: "center", gap: 16, fontFamily: "inherit",
+          }}
+        >
+          <div style={{ width: 52, height: 52, borderRadius: 16, background: "#F5F2EF", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 26 }}>➕</div>
+          <div style={{ flex: 1, textAlign: "right" }}>
+            <div style={{ fontSize: 16, fontWeight: 600, color: "#888" }}>הוסף משק בית</div>
+            <div style={{ fontSize: 13, color: "#BBB", marginTop: 2 }}>צור חדש או הצטרף לקיים</div>
+          </div>
         </button>
       </div>
     </div>
@@ -1351,30 +1423,68 @@ async function migrateExistingData(householdId) {
 }
 
 export default function GroceryApp() {
-  const [userName,      setUserName]      = useState(() => localStorage.getItem("grocery-username")    || "");
-  const [householdId,   setHouseholdId]   = useState(() => localStorage.getItem("grocery-householdId") || "");
-  const [householdName, setHouseholdName] = useState(() => localStorage.getItem("grocery-householdName") || "");
+  const [userName,      setUserName]  = useState(() => localStorage.getItem("grocery-username") || "");
+  const [authReady,     setAuthReady] = useState(false);
+  const [screen,        setScreen]   = useState("home");
+  const [showAddHousehold, setShowAddHousehold] = useState(false);
+
+  // ── Active household (session-only — not restored from localStorage) ──
+  const [householdId,   setHouseholdId]   = useState("");
+  const [householdName, setHouseholdName] = useState("");
   const [inviteCode,    setInviteCode]    = useState("");
-  const [authReady,     setAuthReady]     = useState(false);
-  const [screen,        setScreen]        = useState("home");
+
+  // ── Persistent list of all households this user belongs to ──
+  const [households, setHouseholds] = useState(() => {
+    try {
+      const saved = localStorage.getItem("grocery-households");
+      if (saved) return JSON.parse(saved);
+      // Migrate: if the user had a single household before, carry it over
+      const id   = localStorage.getItem("grocery-householdId");
+      const name = localStorage.getItem("grocery-householdName");
+      if (id && name) {
+        const list = [{ id, name }];
+        localStorage.setItem("grocery-households", JSON.stringify(list));
+        return list;
+      }
+      return [];
+    } catch { return []; }
+  });
 
   const saveName = (name) => { localStorage.setItem("grocery-username", name); setUserName(name); };
 
+  // ── Called after creating or joining a household ──
   const saveHousehold = async (id, name) => {
+    // Add to persistent list if this household is new
+    setHouseholds(prev => {
+      if (prev.find(h => h.id === id)) return prev;
+      const updated = [...prev, { id, name }];
+      localStorage.setItem("grocery-households", JSON.stringify(updated));
+      return updated;
+    });
+    // Make it the active household for this session
     setHouseholdId(id);
     setHouseholdName(name);
-    // Fetch invite code to display in HomeScreen header
+    setShowAddHousehold(false);
     try {
       const snap = await getDoc(doc(db, "households", id));
       if (snap.exists()) setInviteCode(snap.data().inviteCode || "");
-    } catch {}
-    // Migrate existing flat data into the household (only runs once)
+    } catch (e) { console.error("Failed to load invite code:", e); }
     await migrateExistingData(id);
   };
 
+  // ── Select an existing household from the picker ──
+  const selectHousehold = async (id, name) => {
+    setHouseholdId(id);
+    setHouseholdName(name);
+    try {
+      const snap = await getDoc(doc(db, "households", id));
+      if (snap.exists()) setInviteCode(snap.data().inviteCode || "");
+    } catch (e) { console.error("Failed to load invite code:", e); }
+    setScreen("home");
+  };
+
+  // ── Switch: clears active household → back to picker ──
   const switchHousehold = () => {
-    localStorage.removeItem("grocery-householdId");
-    localStorage.removeItem("grocery-householdName");
     setHouseholdId("");
     setHouseholdName("");
     setInviteCode("");
@@ -1382,24 +1492,43 @@ export default function GroceryApp() {
   };
 
   useEffect(() => {
+    // Safety timeout — if auth hangs for any reason, let the app load anyway
+    const timeout = setTimeout(() => setAuthReady(true), 5000);
     auth.authStateReady()
       .then(() => { if (!auth.currentUser) return signInAnonymously(auth); })
-      .then(() => setAuthReady(true))
-      .catch((e) => console.error("Auth error:", e));
+      .then(() => { clearTimeout(timeout); setAuthReady(true); })
+      .catch((e) => { console.error("Auth error:", e); clearTimeout(timeout); setAuthReady(true); });
   }, []);
 
-  // Load invite code on startup if household already set
-  useEffect(() => {
-    if (!householdId) return;
-    getDoc(doc(db, "households", householdId))
-      .then((snap) => { if (snap.exists()) setInviteCode(snap.data().inviteCode || ""); })
-      .catch(() => {});
-  }, [householdId]);
+  if (!authReady) return <Loader />;
 
-  if (!authReady)    return <Loader />;
-  if (!userName)     return <NameSetup onSave={saveName} />;
-  if (!householdId)  return <HouseholdSetup userName={userName} onDone={saveHousehold} />;
+  // Screen 1: Enter name
+  if (!userName) return <NameSetup onSave={saveName} />;
 
+  // Screen 2a: No households yet, or explicitly adding a new one
+  if (households.length === 0 || showAddHousehold) {
+    return (
+      <HouseholdSetup
+        userName={userName}
+        onDone={saveHousehold}
+        onCancel={households.length > 0 ? () => setShowAddHousehold(false) : undefined}
+      />
+    );
+  }
+
+  // Screen 2b: Has households → picker (shown every session until one is chosen)
+  if (!householdId) {
+    return (
+      <HouseholdPickerScreen
+        userName={userName}
+        households={households}
+        onSelect={selectHousehold}
+        onAddHousehold={() => setShowAddHousehold(true)}
+      />
+    );
+  }
+
+  // Screen 3+: Main app
   if (screen === "shopping")  return <ShoppingScreen  userName={userName} householdId={householdId} onBack={() => setScreen("home")} />;
   if (screen === "coupons")   return <CouponsScreen   userName={userName} householdId={householdId} onBack={() => setScreen("home")} />;
   if (screen === "insurance") return <InsuranceScreen userName={userName} householdId={householdId} onBack={() => setScreen("home")} />;
