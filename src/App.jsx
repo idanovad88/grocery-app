@@ -818,11 +818,11 @@ function ShoppingScreen({ userName, householdId, onBack }) {
               <h3 style={{ margin: 0, fontSize: 17, fontWeight: 600, color: "#E53935" }}>🗑️ מחיקת כל הפריטים</h3>
               <button onClick={() => { setShowDeleteAll(false); setDeleteAllConfirm(""); }} style={{ background: "none", border: "none", fontSize: 22, cursor: "pointer", color: "#999", lineHeight: 1 }}>✕</button>
             </div>
-            <p style={{ margin: "0 0 16px", fontSize: 14, color: "#666", lineHeight: 1.5 }}>פעולה זו תמחק את כל {items.length} הפריטים ברשימה ולא ניתן לשחזר אותם.<br/>כדי לאשר, הקלד <strong>מחק הכל</strong> בתיבה:</p>
+            <p style={{ margin: "0 0 16px", fontSize: 14, color: "#666", lineHeight: 1.5 }}>פעולה זו תמחק את כל {items.length} הפריטים ברשימה ולא ניתן לשחזר אותם.<br/>כדי לאשר, הקלד <strong>מחק</strong> בתיבה:</p>
             <input
               value={deleteAllConfirm}
               onChange={(e) => setDeleteAllConfirm(e.target.value)}
-              placeholder="מחק הכל"
+              placeholder="מחק"
               autoFocus
               style={{ ...inputStyle, marginBottom: 16 }}
               onFocus={(e) => (e.target.style.borderColor = "#E53935")}
@@ -831,9 +831,9 @@ function ShoppingScreen({ userName, householdId, onBack }) {
             <div style={{ display: "flex", gap: 8, paddingBottom: 8 }}>
               <button
                 onClick={deleteAllItems}
-                disabled={deleteAllConfirm !== "מחק הכל"}
-                style={{ flex: 1, border: "none", background: deleteAllConfirm === "מחק הכל" ? "#E53935" : "#ccc", color: "#fff", borderRadius: 12, padding: "14px", fontSize: 15, fontWeight: 600, fontFamily: "inherit", cursor: deleteAllConfirm === "מחק הכל" ? "pointer" : "default" }}>
-                מחק הכל
+                disabled={deleteAllConfirm !== "מחק"}
+                style={{ flex: 1, border: "none", background: deleteAllConfirm === "מחק" ? "#E53935" : "#ccc", color: "#fff", borderRadius: 12, padding: "14px", fontSize: 15, fontWeight: 600, fontFamily: "inherit", cursor: deleteAllConfirm === "מחק" ? "pointer" : "default" }}>
+                מחק
               </button>
               <button onClick={() => { setShowDeleteAll(false); setDeleteAllConfirm(""); }}
                 style={{ border: "2px solid #E8E5E0", background: "#fff", color: "#999", borderRadius: 12, padding: "14px 20px", fontSize: 15, fontFamily: "inherit", cursor: "pointer" }}>ביטול</button>
@@ -869,6 +869,10 @@ function CouponsScreen({ userName, householdId, onBack }) {
 
   // Undo-delete state
   const [pendingDelete, setPendingDelete] = useState(null);
+
+  // Delete-all confirmation state
+  const [showDeleteAll, setShowDeleteAll] = useState(false);
+  const [deleteAllConfirm, setDeleteAllConfirm] = useState("");
 
   // Edit state
   const [editingCoupon, setEditingCoupon]     = useState(null);
@@ -930,6 +934,15 @@ function CouponsScreen({ userName, householdId, onBack }) {
 
   const undoDelete = () => {
     if (pendingDelete) { clearTimeout(pendingDelete.timerId); setPendingDelete(null); }
+  };
+
+  const deleteAllCoupons = async () => {
+    try {
+      const snap = await getDocs(collection(db, "households", householdId, "coupons"));
+      await Promise.all(snap.docs.map(d => deleteDoc(doc(db, "households", householdId, "coupons", d.id))));
+    } catch (e) { console.error("Error deleting all coupons:", e); }
+    setShowDeleteAll(false);
+    setDeleteAllConfirm("");
   };
 
   const copyCode = (id, c) => { navigator.clipboard.writeText(c).then(() => { setCopiedId(id); setTimeout(() => setCopiedId(null), 2000); }); };
@@ -1003,7 +1016,12 @@ function CouponsScreen({ userName, householdId, onBack }) {
             <h1 style={{ margin: 0, fontSize: 26, fontWeight: 700, color: "#fff" }}>🎟️ שוברים</h1>
             <p style={{ margin: "4px 0 0", fontSize: 13, color: "rgba(255,255,255,0.6)", fontWeight: 300 }}>{coupons.length} שוברים שמורים</p>
           </div>
-          <BackButton onBack={onBack} light />
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            {coupons.length > 0 && (
+              <button onClick={() => { setShowDeleteAll(true); setDeleteAllConfirm(""); }} style={{ background: "rgba(255,255,255,0.15)", border: "none", borderRadius: 12, padding: "8px 12px", cursor: "pointer", color: "#fff", fontSize: 18, lineHeight: 1 }}>🗑️</button>
+            )}
+            <BackButton onBack={onBack} light />
+          </div>
         </div>
       </div>
 
@@ -1189,6 +1207,30 @@ function CouponsScreen({ userName, householdId, onBack }) {
         </div>
       )}
 
+      {/* ── Delete All Confirmation Modal ── */}
+      {showDeleteAll && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 100, display: "flex", alignItems: "flex-end", justifyContent: "center" }} onClick={(e) => { if (e.target === e.currentTarget) { setShowDeleteAll(false); setDeleteAllConfirm(""); } }}>
+          <div dir="rtl" style={{ background: "#fff", borderRadius: "24px 24px 0 0", padding: 24, width: "100%", maxWidth: 480, animation: "slideUp 0.3s ease" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+              <h3 style={{ margin: 0, fontSize: 17, fontWeight: 600, color: "#E53935" }}>🗑️ מחיקת כל השוברים</h3>
+              <button onClick={() => { setShowDeleteAll(false); setDeleteAllConfirm(""); }} style={{ background: "none", border: "none", fontSize: 22, cursor: "pointer", color: "#999", lineHeight: 1 }}>✕</button>
+            </div>
+            <p style={{ margin: "0 0 16px", fontSize: 14, color: "#666", lineHeight: 1.5 }}>פעולה זו תמחק את כל {coupons.length} השוברים ולא ניתן לשחזר אותם.<br/>כדי לאשר, הקלד <strong>מחק</strong> בתיבה:</p>
+            <input value={deleteAllConfirm} onChange={(e) => setDeleteAllConfirm(e.target.value)} placeholder="מחק" autoFocus
+              style={{ ...inputStyle, marginBottom: 16 }}
+              onFocus={(e) => (e.target.style.borderColor = "#E53935")} onBlur={(e) => (e.target.style.borderColor = "#E8E5E0")} />
+            <div style={{ display: "flex", gap: 8, paddingBottom: 8 }}>
+              <button onClick={deleteAllCoupons} disabled={deleteAllConfirm !== "מחק"}
+                style={{ flex: 1, border: "none", background: deleteAllConfirm === "מחק" ? "#E53935" : "#ccc", color: "#fff", borderRadius: 12, padding: "14px", fontSize: 15, fontWeight: 600, fontFamily: "inherit", cursor: deleteAllConfirm === "מחק" ? "pointer" : "default" }}>
+                מחק הכל
+              </button>
+              <button onClick={() => { setShowDeleteAll(false); setDeleteAllConfirm(""); }}
+                style={{ border: "2px solid #E8E5E0", background: "#fff", color: "#999", borderRadius: 12, padding: "14px 20px", fontSize: 15, fontFamily: "inherit", cursor: "pointer" }}>ביטול</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <GlobalStyles />
     </div>
   );
@@ -1214,6 +1256,8 @@ function InsuranceScreen({ userName, householdId, onBack }) {
   const [uploading, setUploading]     = useState(false);
   const [fileError, setFileError]     = useState(null);
   const [pendingDelete, setPendingDelete] = useState(null);
+  const [showDeleteAll, setShowDeleteAll] = useState(false);
+  const [deleteAllConfirm, setDeleteAllConfirm] = useState("");
   const fileInputRef = useRef(null);
 
   const [editingDoc, setEditingDoc]           = useState(null);
@@ -1282,6 +1326,15 @@ function InsuranceScreen({ userName, householdId, onBack }) {
 
   const undoDelete = () => { if (pendingDelete) { clearTimeout(pendingDelete.timerId); setPendingDelete(null); } };
 
+  const deleteAllDocs = async () => {
+    try {
+      const snap = await getDocs(collection(db, "households", householdId, "insurance"));
+      await Promise.all(snap.docs.map(d => deleteDoc(doc(db, "households", householdId, "insurance", d.id))));
+    } catch (e) { console.error("Error deleting all insurance docs:", e); }
+    setShowDeleteAll(false);
+    setDeleteAllConfirm("");
+  };
+
   const openEdit = (d) => {
     setEditingDoc(d);
     setEditTitle(d.title || ""); setEditComment(d.comment || "");
@@ -1349,7 +1402,12 @@ function InsuranceScreen({ userName, householdId, onBack }) {
             <h1 style={{ margin: 0, fontSize: 26, fontWeight: 700, color: "#fff" }}>🛡️ מסמכי ביטוח</h1>
             <p style={{ margin: "4px 0 0", fontSize: 13, color: "rgba(255,255,255,0.6)", fontWeight: 300 }}>{docs.length} מסמכים שמורים</p>
           </div>
-          <BackButton onBack={onBack} light />
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            {docs.length > 0 && (
+              <button onClick={() => { setShowDeleteAll(true); setDeleteAllConfirm(""); }} style={{ background: "rgba(255,255,255,0.15)", border: "none", borderRadius: 12, padding: "8px 12px", cursor: "pointer", color: "#fff", fontSize: 18, lineHeight: 1 }}>🗑️</button>
+            )}
+            <BackButton onBack={onBack} light />
+          </div>
         </div>
       </div>
 
@@ -1494,6 +1552,30 @@ function InsuranceScreen({ userName, householdId, onBack }) {
                 {editUploading ? "שומר..." : "שמור שינויים ✓"}
               </button>
               <button onClick={closeEdit} style={{ border: "2px solid #E8E5E0", background: "#fff", color: "#999", borderRadius: 12, padding: "14px 20px", fontSize: 15, fontFamily: "inherit", cursor: "pointer" }}>✕</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Delete All Confirmation Modal ── */}
+      {showDeleteAll && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 100, display: "flex", alignItems: "flex-end", justifyContent: "center" }} onClick={(e) => { if (e.target === e.currentTarget) { setShowDeleteAll(false); setDeleteAllConfirm(""); } }}>
+          <div dir="rtl" style={{ background: "#fff", borderRadius: "24px 24px 0 0", padding: 24, width: "100%", maxWidth: 480, animation: "slideUp 0.3s ease" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+              <h3 style={{ margin: 0, fontSize: 17, fontWeight: 600, color: "#E53935" }}>🗑️ מחיקת כל המסמכים</h3>
+              <button onClick={() => { setShowDeleteAll(false); setDeleteAllConfirm(""); }} style={{ background: "none", border: "none", fontSize: 22, cursor: "pointer", color: "#999", lineHeight: 1 }}>✕</button>
+            </div>
+            <p style={{ margin: "0 0 16px", fontSize: 14, color: "#666", lineHeight: 1.5 }}>פעולה זו תמחק את כל {docs.length} המסמכים ולא ניתן לשחזר אותם.<br/>כדי לאשר, הקלד <strong>מחק</strong> בתיבה:</p>
+            <input value={deleteAllConfirm} onChange={(e) => setDeleteAllConfirm(e.target.value)} placeholder="מחק" autoFocus
+              style={{ ...inputStyle, marginBottom: 16 }}
+              onFocus={(e) => (e.target.style.borderColor = "#E53935")} onBlur={(e) => (e.target.style.borderColor = "#E8E5E0")} />
+            <div style={{ display: "flex", gap: 8, paddingBottom: 8 }}>
+              <button onClick={deleteAllDocs} disabled={deleteAllConfirm !== "מחק"}
+                style={{ flex: 1, border: "none", background: deleteAllConfirm === "מחק" ? "#E53935" : "#ccc", color: "#fff", borderRadius: 12, padding: "14px", fontSize: 15, fontWeight: 600, fontFamily: "inherit", cursor: deleteAllConfirm === "מחק" ? "pointer" : "default" }}>
+                מחק הכל
+              </button>
+              <button onClick={() => { setShowDeleteAll(false); setDeleteAllConfirm(""); }}
+                style={{ border: "2px solid #E8E5E0", background: "#fff", color: "#999", borderRadius: 12, padding: "14px 20px", fontSize: 15, fontFamily: "inherit", cursor: "pointer" }}>ביטול</button>
             </div>
           </div>
         </div>
