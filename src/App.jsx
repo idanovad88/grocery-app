@@ -1746,6 +1746,8 @@ function BirthdaysScreen({ userName, householdId, onBack }) {
         </div>
       </div>
 
+      {!showAdd && <FAB onClick={() => setShowAdd(true)} color={`linear-gradient(135deg, ${BDAY_PINK}, ${BDAY_DARK})`} shadow="rgba(233,30,99,0.4)" />}
+
       {/* Undo Delete Toast */}
       {pendingDelete && (
         <div style={{ position: "fixed", bottom: 104, left: "50%", transform: "translateX(-50%)", background: "#2D3436", color: "#fff", borderRadius: 14, padding: "12px 18px", display: "flex", alignItems: "center", gap: 14, zIndex: 60, boxShadow: "0 6px 24px rgba(0,0,0,0.3)", whiteSpace: "nowrap", animation: "slideUp 0.25s ease" }}>
