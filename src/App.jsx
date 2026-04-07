@@ -383,6 +383,18 @@ function HouseholdPickerScreen({ userName, households, onSelect, onAddHousehold,
     { bg: "#FCE4EC", icon: "#880E4F" },
   ];
 
+  const [pendingDelete, setPendingDelete] = useState(null);
+
+  const handleDelete = (id, name) => {
+    if (pendingDelete) clearTimeout(pendingDelete.timerId);
+    const timerId = setTimeout(() => { onDelete(id); setPendingDelete(null); }, 4500);
+    setPendingDelete({ id, name, timerId });
+  };
+
+  const undoDelete = () => {
+    if (pendingDelete) { clearTimeout(pendingDelete.timerId); setPendingDelete(null); }
+  };
+
   return (
     <div dir="rtl" style={{ fontFamily: "'Rubik', sans-serif", maxWidth: 480, margin: "0 auto", minHeight: "100vh", background: "linear-gradient(165deg, #FAFAFA 0%, #F0EDE8 100%)" }}>
       {/* Header */}
@@ -394,11 +406,11 @@ function HouseholdPickerScreen({ userName, households, onSelect, onAddHousehold,
 
       {/* List */}
       <div style={{ padding: "0 16px 32px" }}>
-        {households.map((h, i) => {
+        {households.filter(h => h.id !== pendingDelete?.id).map((h, i) => {
           const col = HOUSE_COLORS[i % HOUSE_COLORS.length];
           return (
             <div key={h.id} style={{ marginBottom: 12 }}>
-              <SwipeItem onSwipeLeft={() => onDelete(h.id)} borderRadius={20}>
+              <SwipeItem onSwipeLeft={() => handleDelete(h.id, h.name)} borderRadius={20}>
                 <div
                   onClick={() => onSelect(h.id, h.name)}
                   style={{
@@ -435,6 +447,14 @@ function HouseholdPickerScreen({ userName, households, onSelect, onAddHousehold,
           </div>
         </button>
       </div>
+
+      {/* Undo Delete Toast */}
+      {pendingDelete && (
+        <div style={{ position: "fixed", bottom: 32, left: "50%", transform: "translateX(-50%)", background: "#2D3436", color: "#fff", borderRadius: 14, padding: "12px 18px", display: "flex", alignItems: "center", gap: 14, zIndex: 60, boxShadow: "0 6px 24px rgba(0,0,0,0.3)", whiteSpace: "nowrap", animation: "slideUp 0.25s ease" }}>
+          <span style={{ fontSize: 14 }}>🗑️ "{pendingDelete.name}" הוסר</span>
+          <button onClick={undoDelete} style={{ background: "#636E72", border: "none", borderRadius: 8, padding: "6px 14px", color: "#fff", fontSize: 13, fontWeight: 600, fontFamily: "inherit", cursor: "pointer" }}>ביטול</button>
+        </div>
+      )}
     </div>
   );
 }
