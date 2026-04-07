@@ -876,6 +876,8 @@ function CouponsScreen({ userName, householdId, onBack }) {
   const [showDeleteAll, setShowDeleteAll] = useState(false);
   const [deleteAllConfirm, setDeleteAllConfirm] = useState("");
 
+  const [lightboxSrc, setLightboxSrc] = useState(null);
+
   // Edit state
   const [editingCoupon, setEditingCoupon]     = useState(null);
   const [editTitle, setEditTitle]             = useState("");
@@ -1105,7 +1107,7 @@ function CouponsScreen({ userName, householdId, onBack }) {
                         <span style={{ fontSize: 12, color: "#B39DDB" }}>↗</span>
                       </a>
                     ) : (
-                      <img src={coupon.imageUrl} alt={coupon.title} style={{ width: "100%", height: 140, objectFit: "cover" }} />
+                      <img src={coupon.imageUrl} alt={coupon.title} onClick={(e) => { e.stopPropagation(); setLightboxSrc(coupon.imageUrl); }} style={{ width: "100%", height: 140, objectFit: "cover", cursor: "zoom-in" }} />
                     )
                   )}
                   <div style={{ padding: "14px 16px" }}>
@@ -1209,6 +1211,8 @@ function CouponsScreen({ userName, householdId, onBack }) {
         </div>
       )}
 
+      <ImageLightbox src={lightboxSrc} onClose={() => setLightboxSrc(null)} />
+
       {/* ── Delete All Confirmation Modal ── */}
       {showDeleteAll && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 100, display: "flex", alignItems: "flex-end", justifyContent: "center" }} onClick={(e) => { if (e.target === e.currentTarget) { setShowDeleteAll(false); setDeleteAllConfirm(""); } }}>
@@ -1260,6 +1264,7 @@ function InsuranceScreen({ userName, householdId, onBack }) {
   const [pendingDelete, setPendingDelete] = useState(null);
   const [showDeleteAll, setShowDeleteAll] = useState(false);
   const [deleteAllConfirm, setDeleteAllConfirm] = useState("");
+  const [lightboxSrc, setLightboxSrc] = useState(null);
   const fileInputRef = useRef(null);
 
   const [editingDoc, setEditingDoc]           = useState(null);
@@ -1481,7 +1486,7 @@ function InsuranceScreen({ userName, householdId, onBack }) {
                         <span style={{ fontSize: 12, color: "#90CAF9" }}>↗</span>
                       </a>
                     ) : (
-                      <img src={insDoc.fileUrl} alt={insDoc.title} style={{ width: "100%", height: 120, objectFit: "cover" }} />
+                      <img src={insDoc.fileUrl} alt={insDoc.title} onClick={(e) => { e.stopPropagation(); setLightboxSrc(insDoc.fileUrl); }} style={{ width: "100%", height: 120, objectFit: "cover", cursor: "zoom-in" }} />
                     )
                   )}
                   <div style={{ padding: "14px 16px" }}>
@@ -1558,6 +1563,8 @@ function InsuranceScreen({ userName, householdId, onBack }) {
           </div>
         </div>
       )}
+
+      <ImageLightbox src={lightboxSrc} onClose={() => setLightboxSrc(null)} />
 
       {/* ── Delete All Confirmation Modal ── */}
       {showDeleteAll && (
@@ -1784,6 +1791,21 @@ function BirthdaysScreen({ userName, householdId, onBack }) {
       )}
 
       <GlobalStyles />
+    </div>
+  );
+}
+
+// ─── ImageLightbox ────────────────────────────────────────────────────────────
+
+function ImageLightbox({ src, onClose }) {
+  if (!src) return null;
+  return (
+    <div
+      onClick={onClose}
+      style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.92)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center" }}
+    >
+      <button onClick={onClose} style={{ position: "absolute", top: 20, left: 20, background: "rgba(255,255,255,0.15)", border: "none", borderRadius: "50%", width: 40, height: 40, fontSize: 20, color: "#fff", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
+      <img src={src} alt="" onClick={(e) => e.stopPropagation()} style={{ maxWidth: "95vw", maxHeight: "90vh", borderRadius: 12, objectFit: "contain", boxShadow: "0 8px 40px rgba(0,0,0,0.6)" }} />
     </div>
   );
 }
