@@ -461,10 +461,11 @@ function HouseholdPickerScreen({ userName, households, onSelect, onAddHousehold,
 
 // ─── HomeScreen ───────────────────────────────────────────────────────────────
 
-function HomeScreen({ userName, householdName, inviteCode, onNavigate, onSwitchHousehold }) {
+function HomeScreen({ userName, householdName, inviteCode, onNavigate, onSwitchHousehold, householdId }) {
+  const storageKey = `module-order-${householdId}`;
   const [moduleOrder, setModuleOrder] = useState(() => {
     try {
-      const saved = localStorage.getItem("module-order");
+      const saved = localStorage.getItem(storageKey);
       if (saved) {
         const parsed = JSON.parse(saved);
         const ids = MODULES.map(m => m.id);
@@ -512,7 +513,7 @@ function HomeScreen({ userName, householdName, inviteCode, onNavigate, onSwitchH
       const [item] = newOrder.splice(from, 1);
       newOrder.splice(overIndex, 0, item);
       setModuleOrder(newOrder);
-      localStorage.setItem("module-order", JSON.stringify(newOrder));
+      localStorage.setItem(storageKey, JSON.stringify(newOrder));
     }
     setDragIndex(null); setOverIndex(null); setDragY(0);
   };
@@ -1766,6 +1767,7 @@ export default function GroceryApp() {
       inviteCode={inviteCode}
       onNavigate={setScreen}
       onSwitchHousehold={switchHousehold}
+      householdId={householdId}
     />
   );
 }
