@@ -42,8 +42,9 @@ const MODULES = [
   { id: "shopping",  icon: "🛒", label: "רשימת קניות",   desc: "ניהול קניות משותף",        color: "#2D3436", bg: "#F0EDED", available: true  },
   { id: "coupons",   icon: "🎟️", label: "שוברים",        desc: "שמירת שוברים והטבות",      color: "#8E44AD", bg: "#F5EEF8", available: true  },
   { id: "insurance", icon: "🛡️", label: "מסמכי ביטוח",  desc: "ניהול פוליסות וביטוחים",   color: "#1565C0", bg: "#E3F2FD", available: true  },
-  { id: "birthdays", icon: "🎈", label: "ימי הולדת",     desc: "מעקב ימי הולדת משפחה",     color: "#E91E63", bg: "#FCE4EC", available: true  },
-  { id: "receipts",  icon: "🧾", label: "קבלות",         desc: "ארגון קבלות ותשלומים",     color: "#2980B9", bg: "#EBF5FB", available: false },
+  { id: "birthdays",     icon: "🎈", label: "ימי הולדת",     desc: "מעקב ימי הולדת משפחה",     color: "#E91E63", bg: "#FCE4EC", available: true  },
+  { id: "subscriptions", icon: "📺", label: "מנויים",        desc: "ניהול מנויים ותשלומים חוזרים", color: "#00897B", bg: "#E0F2F1", available: true  },
+  { id: "receipts",      icon: "🧾", label: "קבלות",         desc: "ארגון קבלות ותשלומים",     color: "#2980B9", bg: "#EBF5FB", available: false },
 ];
 
 // ─── Shared input style ───────────────────────────────────────────────────────
@@ -1795,6 +1796,245 @@ function BirthdaysScreen({ userName, householdId, onBack }) {
   );
 }
 
+// ─── SubscriptionsScreen ─────────────────────────────────────────────────────
+
+const SUB_GREEN  = "#00897B";
+const SUB_DARK   = "#00695C";
+
+const SUB_PRESETS = [
+  { name: "Netflix",        icon: "🎬" },
+  { name: "Disney+",        icon: "🏰" },
+  { name: "Apple TV+",      icon: "🍎" },
+  { name: "Spotify",        icon: "🎵" },
+  { name: "YouTube Premium",icon: "▶️" },
+  { name: "כבלים / HOT",    icon: "📡" },
+  { name: "אינטרנט",        icon: "🌐" },
+  { name: "סלולר",          icon: "📱" },
+  { name: "iCloud",         icon: "☁️" },
+  { name: "Amazon Prime",   icon: "📦" },
+  { name: "Xbox / PS Plus", icon: "🎮" },
+];
+
+function getDaysUntilRenewal(dateStr) {
+  if (!dateStr) return Infinity;
+  const today = new Date(); today.setHours(0,0,0,0);
+  const d = new Date(dateStr); d.setHours(0,0,0,0);
+  return Math.round((d - today) / 86400000);
+}
+
+function SubscriptionsScreen({ userName, householdId, onBack }) {
+  const [subs, setSubs]           = useState([]);
+  const [loading, setLoading]     = useState(true);
+  const [showAdd, setShowAdd]     = useState(false);
+  const [name, setName]           = useState("");
+  const [customIcon, setCustomIcon] = useState("📺");
+  const [price, setPrice]         = useState("");
+  const [renewalDate, setRenewalDate] = useState("");
+  const [pendingDelete, setPendingDelete] = useState(null);
+  const [editingSub, setEditingSub]       = useState(null);
+  const [editName, setEditName]           = useState("");
+  const [editIcon, setEditIcon]           = useState("📺");
+  const [editPrice, setEditPrice]         = useState("");
+  const [editRenewalDate, setEditRenewalDate] = useState("");
+
+  useEffect(() => {
+    const q = query(collection(db, "households", householdId, "subscriptions"), orderBy("renewalDate", "asc"));
+    const unsub = onSnapshot(q, (snap) => { setSubs(snap.docs.map(d => ({ id: d.id, ...d.data() }))); setLoading(false); });
+    return () => unsub();
+  }, [householdId]);
+
+  const addSub = async () => {
+    if (!name.trim()) return;
+    try { await addDoc(collection(db, "households", householdId, "subscriptions"), { name: name.trim(), icon: customIcon, price: price.trim(), renewalDate, addedBy: userName, date: new Date().toISOString() }); }
+    catch (e) { console.error(e); }
+    setName(""); setCustomIcon("📺"); setPrice(""); setRenewalDate(""); setShowAdd(false);
+  };
+
+  const removeSub = (id, subData) => {
+    if (pendingDelete) clearTimeout(pendingDelete.timerId);
+    const timerId = setTimeout(async () => {
+      try { await deleteDoc(doc(db, "households", householdId, "subscriptions", id)); } catch (e) { console.error(e); }
+      setPendingDelete(null);
+    }, 4500);
+    setPendingDelete({ id, sub: subData, timerId });
+  };
+
+  const undoDelete = () => { if (pendingDelete) { clearTimeout(pendingDelete.timerId); setPendingDelete(null); } };
+
+  const openEdit = (s) => { setEditingSub(s); setEditName(s.name); setEditIcon(s.icon || "📺"); setEditPrice(s.price || ""); setEditRenewalDate(s.renewalDate || ""); };
+  const closeEdit = () => setEditingSub(null);
+  const updateSub = async () => {
+    if (!editName.trim()) return;
+    try { await updateDoc(doc(db, "households", householdId, "subscriptions", editingSub.id), { name: editName.trim(), icon: editIcon, price: editPrice.trim(), renewalDate: editRenewalDate }); closeEdit(); }
+    catch (e) { console.error(e); }
+  };
+
+  const selectPreset = (preset) => { setName(preset.name); setCustomIcon(preset.icon); };
+
+  const sorted = [...subs]
+    .filter(s => s.id !== pendingDelete?.id)
+    .sort((a, b) => getDaysUntilRenewal(a.renewalDate) - getDaysUntilRenewal(b.renewalDate));
+
+  const totalMonthly = subs.reduce((sum, s) => sum + (parseFloat(s.price) || 0), 0);
+
+  if (loading) return <Loader />;
+
+  return (
+    <div dir="rtl" style={{ fontFamily: "'Rubik', sans-serif", maxWidth: 480, margin: "0 auto", minHeight: "100vh", background: "linear-gradient(165deg, #FAFAFA 0%, #F0EDE8 100%)" }}>
+      {/* Header */}
+      <div style={{ background: `linear-gradient(135deg, ${SUB_GREEN} 0%, ${SUB_DARK} 100%)`, padding: "28px 24px 20px", borderRadius: "0 0 28px 28px", boxShadow: "0 8px 32px rgba(0,137,123,0.25)" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div>
+            <h1 style={{ margin: 0, fontSize: 26, fontWeight: 700, color: "#fff" }}>📺 מנויים</h1>
+            <p style={{ margin: "4px 0 0", fontSize: 13, color: "rgba(255,255,255,0.7)", fontWeight: 300 }}>
+              {subs.length} מנויים{totalMonthly > 0 ? ` · ₪${totalMonthly.toFixed(0)}/חודש` : ""}
+            </p>
+          </div>
+          <BackButton onBack={onBack} light />
+        </div>
+      </div>
+
+      <div style={{ padding: "16px 16px 100px" }}>
+        {/* Add form */}
+        {showAdd && (
+          <div style={{ background: "#fff", borderRadius: 20, padding: 20, marginBottom: 16, boxShadow: "0 4px 20px rgba(0,0,0,0.08)", animation: "slideDown 0.3s ease" }}>
+            <h3 style={{ margin: "0 0 12px", fontSize: 16, fontWeight: 600, color: "#2D3436" }}>מנוי חדש</h3>
+
+            {/* Presets */}
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 14 }}>
+              {SUB_PRESETS.map(p => (
+                <button key={p.name} onClick={() => selectPreset(p)}
+                  style={{ border: name === p.name ? `2px solid ${SUB_GREEN}` : "2px solid #E8E5E0", background: name === p.name ? "#E0F2F1" : "#FAFAFA", borderRadius: 10, padding: "6px 10px", cursor: "pointer", fontSize: 13, fontFamily: "inherit", fontWeight: name === p.name ? 600 : 400, color: name === p.name ? SUB_GREEN : "#666", display: "flex", alignItems: "center", gap: 4 }}>
+                  {p.icon} {p.name}
+                </button>
+              ))}
+            </div>
+
+            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="שם המנוי *"
+              style={inputStyle} onFocus={(e) => (e.target.style.borderColor = SUB_GREEN)} onBlur={(e) => (e.target.style.borderColor = "#E8E5E0")} />
+
+            <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
+              <div style={{ flex: 1 }}>
+                <p style={{ margin: "0 0 6px", fontSize: 13, color: "#888" }}>מחיר חודשי (₪)</p>
+                <input value={price} onChange={(e) => setPrice(e.target.value)} placeholder="0" type="number" min="0"
+                  style={{ ...inputStyle, textAlign: "left" }} onFocus={(e) => (e.target.style.borderColor = SUB_GREEN)} onBlur={(e) => (e.target.style.borderColor = "#E8E5E0")} />
+              </div>
+              <div style={{ flex: 1 }}>
+                <p style={{ margin: "0 0 6px", fontSize: 13, color: "#888" }}>תאריך חידוש</p>
+                <input value={renewalDate} onChange={(e) => setRenewalDate(e.target.value)} type="date"
+                  style={{ ...inputStyle, color: renewalDate ? "#2D3436" : "#CCC" }} onFocus={(e) => (e.target.style.borderColor = SUB_GREEN)} onBlur={(e) => (e.target.style.borderColor = "#E8E5E0")} />
+              </div>
+            </div>
+
+            <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
+              <button onClick={addSub} disabled={!name.trim()}
+                style={{ flex: 1, border: "none", background: name.trim() ? `linear-gradient(135deg, ${SUB_GREEN}, ${SUB_DARK})` : "#ccc", color: "#fff", borderRadius: 12, padding: "14px", fontSize: 15, fontWeight: 600, fontFamily: "inherit", cursor: name.trim() ? "pointer" : "default" }}>
+                שמור ✓
+              </button>
+              <button onClick={() => { setShowAdd(false); setName(""); setCustomIcon("📺"); setPrice(""); setRenewalDate(""); }}
+                style={{ border: "2px solid #E8E5E0", background: "#fff", color: "#999", borderRadius: 12, padding: "14px 20px", fontSize: 15, fontFamily: "inherit", cursor: "pointer" }}>✕</button>
+            </div>
+          </div>
+        )}
+
+        {sorted.length === 0 && !showAdd && (
+          <div style={{ textAlign: "center", padding: "60px 20px" }}>
+            <div style={{ fontSize: 56, marginBottom: 16 }}>📺</div>
+            <p style={{ fontSize: 18, color: "#999", fontWeight: 300 }}>אין מנויים שמורים</p>
+            <p style={{ fontSize: 14, color: "#CCC", fontWeight: 300, marginTop: 4 }}>לחצו על + כדי להוסיף</p>
+          </div>
+        )}
+
+        {sorted.length > 0 && <p style={{ textAlign: "center", fontSize: 12, color: "#BBB", margin: "8px 0 12px", fontWeight: 300 }}>עריכה → | ← מחיקה</p>}
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {sorted.map((s) => {
+            const days     = getDaysUntilRenewal(s.renewalDate);
+            const isToday  = days === 0;
+            const isSoon   = days > 0 && days <= 7;
+            const isExpired = days < 0;
+            return (
+              <SwipeItem key={s.id} borderRadius={18} onSwipeLeft={() => removeSub(s.id, s)} onSwipeRight={() => openEdit(s)}>
+                <div style={{ background: "#fff", borderRadius: 18, padding: "16px 18px", boxShadow: "0 2px 12px rgba(0,0,0,0.06)", display: "flex", alignItems: "center", gap: 14, border: isExpired ? "2px solid #E53935" : isToday ? `2px solid ${SUB_GREEN}` : "2px solid transparent" }}>
+                  <div style={{ width: 48, height: 48, borderRadius: 14, background: isExpired ? "#FFEBEE" : isToday ? "#E0F2F1" : isSoon ? "#FFF3E0" : "#F5F5F5", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 24, flexShrink: 0 }}>
+                    {s.icon || "📺"}
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 16, fontWeight: 600, color: "#2D3436" }}>{s.name}</div>
+                    <div style={{ fontSize: 13, color: "#AAA", marginTop: 2 }}>
+                      {s.price ? `₪${s.price}/חודש` : ""}
+                      {s.price && s.renewalDate ? " · " : ""}
+                      {s.renewalDate ? `חידוש ${new Date(s.renewalDate).toLocaleDateString("he-IL")}` : ""}
+                    </div>
+                  </div>
+                  <div style={{ flexShrink: 0 }}>
+                    {isExpired
+                      ? <span style={{ fontSize: 12, fontWeight: 700, color: "#E53935", background: "#FFEBEE", padding: "4px 10px", borderRadius: 10 }}>פג תוקף</span>
+                      : isToday
+                        ? <span style={{ fontSize: 12, fontWeight: 700, color: SUB_GREEN, background: "#E0F2F1", padding: "4px 10px", borderRadius: 10 }}>היום!</span>
+                        : isSoon
+                          ? <span style={{ fontSize: 12, fontWeight: 700, color: "#E65100", background: "#FFF3E0", padding: "4px 10px", borderRadius: 10 }}>בעוד {days}י׳</span>
+                          : s.renewalDate
+                            ? <span style={{ fontSize: 12, color: "#BBB" }}>בעוד {days}י׳</span>
+                            : null
+                    }
+                  </div>
+                </div>
+              </SwipeItem>
+            );
+          })}
+        </div>
+      </div>
+
+      {!showAdd && <FAB onClick={() => setShowAdd(true)} color={`linear-gradient(135deg, ${SUB_GREEN}, ${SUB_DARK})`} shadow="rgba(0,137,123,0.4)" />}
+
+      {/* Undo Delete Toast */}
+      {pendingDelete && (
+        <div style={{ position: "fixed", bottom: 104, left: "50%", transform: "translateX(-50%)", background: "#2D3436", color: "#fff", borderRadius: 14, padding: "12px 18px", display: "flex", alignItems: "center", gap: 14, zIndex: 60, boxShadow: "0 6px 24px rgba(0,0,0,0.3)", whiteSpace: "nowrap", animation: "slideUp 0.25s ease" }}>
+          <span style={{ fontSize: 14 }}>🗑️ "{pendingDelete.sub.name}" נמחק</span>
+          <button onClick={undoDelete} style={{ background: SUB_GREEN, border: "none", borderRadius: 8, padding: "6px 14px", color: "#fff", fontSize: 13, fontWeight: 600, fontFamily: "inherit", cursor: "pointer" }}>ביטול</button>
+        </div>
+      )}
+
+      {/* Edit Modal */}
+      {editingSub && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 100, display: "flex", alignItems: "flex-end", justifyContent: "center" }} onClick={(e) => { if (e.target === e.currentTarget) closeEdit(); }}>
+          <div dir="rtl" style={{ background: "#fff", borderRadius: "24px 24px 0 0", padding: 24, width: "100%", maxWidth: 480, animation: "slideUp 0.3s ease" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+              <h3 style={{ margin: 0, fontSize: 17, fontWeight: 600, color: "#2D3436" }}>✏️ עריכת מנוי</h3>
+              <button onClick={closeEdit} style={{ background: "none", border: "none", fontSize: 22, cursor: "pointer", color: "#999", lineHeight: 1 }}>✕</button>
+            </div>
+            <input value={editName} onChange={(e) => setEditName(e.target.value)} placeholder="שם המנוי *" autoFocus
+              style={inputStyle} onFocus={(e) => (e.target.style.borderColor = SUB_GREEN)} onBlur={(e) => (e.target.style.borderColor = "#E8E5E0")} />
+            <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
+              <div style={{ flex: 1 }}>
+                <p style={{ margin: "0 0 6px", fontSize: 13, color: "#888" }}>מחיר חודשי (₪)</p>
+                <input value={editPrice} onChange={(e) => setEditPrice(e.target.value)} placeholder="0" type="number" min="0"
+                  style={{ ...inputStyle, textAlign: "left" }} onFocus={(e) => (e.target.style.borderColor = SUB_GREEN)} onBlur={(e) => (e.target.style.borderColor = "#E8E5E0")} />
+              </div>
+              <div style={{ flex: 1 }}>
+                <p style={{ margin: "0 0 6px", fontSize: 13, color: "#888" }}>תאריך חידוש</p>
+                <input value={editRenewalDate} onChange={(e) => setEditRenewalDate(e.target.value)} type="date"
+                  style={{ ...inputStyle, color: editRenewalDate ? "#2D3436" : "#CCC" }} onFocus={(e) => (e.target.style.borderColor = SUB_GREEN)} onBlur={(e) => (e.target.style.borderColor = "#E8E5E0")} />
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 8, marginTop: 16, paddingBottom: 8 }}>
+              <button onClick={updateSub} disabled={!editName.trim()}
+                style={{ flex: 1, border: "none", background: editName.trim() ? `linear-gradient(135deg, ${SUB_GREEN}, ${SUB_DARK})` : "#ccc", color: "#fff", borderRadius: 12, padding: "14px", fontSize: 15, fontWeight: 600, fontFamily: "inherit", cursor: editName.trim() ? "pointer" : "default" }}>
+                שמור שינויים ✓
+              </button>
+              <button onClick={closeEdit}
+                style={{ border: "2px solid #E8E5E0", background: "#fff", color: "#999", borderRadius: 12, padding: "14px 20px", fontSize: 15, fontFamily: "inherit", cursor: "pointer" }}>✕</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <GlobalStyles />
+    </div>
+  );
+}
+
 // ─── ImageLightbox ────────────────────────────────────────────────────────────
 
 function ImageLightbox({ src, onClose }) {
@@ -1983,7 +2223,8 @@ export default function GroceryApp() {
   if (screen === "shopping")   return <ShoppingScreen   userName={userName} householdId={householdId} onBack={() => setScreen("home")} />;
   if (screen === "coupons")    return <CouponsScreen    userName={userName} householdId={householdId} onBack={() => setScreen("home")} />;
   if (screen === "insurance")  return <InsuranceScreen  userName={userName} householdId={householdId} onBack={() => setScreen("home")} />;
-  if (screen === "birthdays")  return <BirthdaysScreen  userName={userName} householdId={householdId} onBack={() => setScreen("home")} />;
+  if (screen === "birthdays")      return <BirthdaysScreen      userName={userName} householdId={householdId} onBack={() => setScreen("home")} />;
+  if (screen === "subscriptions")  return <SubscriptionsScreen  userName={userName} householdId={householdId} onBack={() => setScreen("home")} />;
   return (
     <HomeScreen
       userName={userName}
