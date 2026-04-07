@@ -613,6 +613,10 @@ function ShoppingScreen({ userName, householdId, onBack }) {
   // Edit state
   const [editingItem, setEditingItem]         = useState(null);
   const [editItemName, setEditItemName]       = useState("");
+
+  // Delete-all confirmation state
+  const [showDeleteAll, setShowDeleteAll] = useState(false);
+  const [deleteAllConfirm, setDeleteAllConfirm] = useState("");
   const [editItemPriority, setEditItemPriority] = useState("yellow");
 
   // Undo-delete state
@@ -626,6 +630,15 @@ function ShoppingScreen({ userName, householdId, onBack }) {
 
   useEffect(() => { localStorage.setItem("grocery-history", JSON.stringify(history)); }, [history]);
   useEffect(() => { if (showAdd && inputRef.current) inputRef.current.focus(); }, [showAdd]);
+
+  const deleteAllItems = async () => {
+    try {
+      const snap = await getDocs(collection(db, "households", householdId, "items"));
+      await Promise.all(snap.docs.map(d => deleteDoc(doc(db, "households", householdId, "items", d.id))));
+    } catch (e) { console.error("Error deleting all items:", e); }
+    setShowDeleteAll(false);
+    setDeleteAllConfirm("");
+  };
 
   const addItem = async () => {
     const name = inputValue.trim();
@@ -677,7 +690,12 @@ function ShoppingScreen({ userName, householdId, onBack }) {
             <h1 style={{ margin: 0, fontSize: 26, fontWeight: 700, color: "#fff" }}>🛒 רשימת קניות</h1>
             <p style={{ margin: "4px 0 0", fontSize: 13, color: "rgba(255,255,255,0.6)", fontWeight: 300 }}>{items.length} פריטים ברשימה</p>
           </div>
-          <BackButton onBack={onBack} />
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            {items.length > 0 && (
+              <button onClick={() => { setShowDeleteAll(true); setDeleteAllConfirm(""); }} style={{ background: "rgba(255,255,255,0.15)", border: "none", borderRadius: 12, padding: "8px 12px", cursor: "pointer", color: "#fff", fontSize: 18, lineHeight: 1 }}>🗑️</button>
+            )}
+            <BackButton onBack={onBack} />
+          </div>
         </div>
       </div>
 
@@ -787,6 +805,38 @@ function ShoppingScreen({ userName, householdId, onBack }) {
               </button>
               <button onClick={closeEditItem}
                 style={{ border: "2px solid #E8E5E0", background: "#fff", color: "#999", borderRadius: 12, padding: "14px 20px", fontSize: 15, fontFamily: "inherit", cursor: "pointer" }}>✕</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Delete All Confirmation Modal ── */}
+      {showDeleteAll && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 100, display: "flex", alignItems: "flex-end", justifyContent: "center" }} onClick={(e) => { if (e.target === e.currentTarget) { setShowDeleteAll(false); setDeleteAllConfirm(""); } }}>
+          <div dir="rtl" style={{ background: "#fff", borderRadius: "24px 24px 0 0", padding: 24, width: "100%", maxWidth: 480, animation: "slideUp 0.3s ease" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+              <h3 style={{ margin: 0, fontSize: 17, fontWeight: 600, color: "#E53935" }}>🗑️ מחיקת כל הפריטים</h3>
+              <button onClick={() => { setShowDeleteAll(false); setDeleteAllConfirm(""); }} style={{ background: "none", border: "none", fontSize: 22, cursor: "pointer", color: "#999", lineHeight: 1 }}>✕</button>
+            </div>
+            <p style={{ margin: "0 0 16px", fontSize: 14, color: "#666", lineHeight: 1.5 }}>פעולה זו תמחק את כל {items.length} הפריטים ברשימה ולא ניתן לשחזר אותם.<br/>כדי לאשר, הקלד <strong>מחק הכל</strong> בתיבה:</p>
+            <input
+              value={deleteAllConfirm}
+              onChange={(e) => setDeleteAllConfirm(e.target.value)}
+              placeholder="מחק הכל"
+              autoFocus
+              style={{ ...inputStyle, marginBottom: 16 }}
+              onFocus={(e) => (e.target.style.borderColor = "#E53935")}
+              onBlur={(e) => (e.target.style.borderColor = "#E8E5E0")}
+            />
+            <div style={{ display: "flex", gap: 8, paddingBottom: 8 }}>
+              <button
+                onClick={deleteAllItems}
+                disabled={deleteAllConfirm !== "מחק הכל"}
+                style={{ flex: 1, border: "none", background: deleteAllConfirm === "מחק הכל" ? "#E53935" : "#ccc", color: "#fff", borderRadius: 12, padding: "14px", fontSize: 15, fontWeight: 600, fontFamily: "inherit", cursor: deleteAllConfirm === "מחק הכל" ? "pointer" : "default" }}>
+                מחק הכל
+              </button>
+              <button onClick={() => { setShowDeleteAll(false); setDeleteAllConfirm(""); }}
+                style={{ border: "2px solid #E8E5E0", background: "#fff", color: "#999", borderRadius: 12, padding: "14px 20px", fontSize: 15, fontFamily: "inherit", cursor: "pointer" }}>ביטול</button>
             </div>
           </div>
         </div>
