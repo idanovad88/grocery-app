@@ -97,26 +97,89 @@ function generateCode() {
 // onSwipeRight = edit   (swipe right, optional)
 
 function SwipeItem({ children, onSwipeLeft, onSwipeRight, borderRadius = 16 }) {
-  const startX   = useRef(0);
-  const currentX = useRef(0);
-  const swiping  = useRef(false);
+  const startX    = useRef(0);
+  const startY    = useRef(0);
+  const currentX  = useRef(0);
+  const swiping   = useRef(false);
+  const locked    = useRef(false); // true once we've committed to horizontal
+  const innerRef  = useRef(null);
   const [offset, setOffset]     = useState(0);
   const [removing, setRemoving] = useState(false);
 
-  const onStart = (e) => { startX.current = e.touches ? e.touches[0].clientX : e.clientX; swiping.current = true; };
-  const onMove  = (e) => {
-    if (!swiping.current) return;
-    const diff = (e.touches ? e.touches[0].clientX : e.clientX) - startX.current;
+  const onSwipeLeftRef  = useRef(onSwipeLeft);
+  const onSwipeRightRef = useRef(onSwipeRight);
+  useEffect(() => { onSwipeLeftRef.current = onSwipeLeft; onSwipeRightRef.current = onSwipeRight; });
+
+  useEffect(() => {
+    const el = innerRef.current;
+    if (!el) return;
+
+    const onTouchStart = (e) => {
+      startX.current   = e.touches[0].clientX;
+      startY.current   = e.touches[0].clientY;
+      currentX.current = 0;
+      swiping.current  = true;
+      locked.current   = false;
+    };
+
+    const onTouchMove = (e) => {
+      if (!swiping.current) return;
+      const dx = e.touches[0].clientX - startX.current;
+      const dy = e.touches[0].clientY - startY.current;
+
+      if (!locked.current) {
+        if (Math.abs(dx) < Math.abs(dy)) { swiping.current = false; return; } // vertical scroll — give up
+        locked.current = true;
+      }
+
+      e.preventDefault(); // stop page scroll now that we own this gesture
+      currentX.current = dx;
+      setOffset(dx);
+    };
+
+    const onTouchEnd = () => {
+      if (!swiping.current) return;
+      swiping.current = false;
+      locked.current  = false;
+      if (currentX.current < -80) {
+        setRemoving(true); setOffset(-500); setTimeout(() => onSwipeLeftRef.current?.(), 300);
+      } else if (currentX.current > 80 && onSwipeRightRef.current) {
+        currentX.current = 0; setOffset(0);
+        onSwipeRightRef.current();
+      } else {
+        currentX.current = 0; setOffset(0);
+      }
+    };
+
+    el.addEventListener("touchstart", onTouchStart, { passive: true });
+    el.addEventListener("touchmove",  onTouchMove,  { passive: false });
+    el.addEventListener("touchend",   onTouchEnd,   { passive: true });
+    el.addEventListener("touchcancel",onTouchEnd,   { passive: true });
+
+    return () => {
+      el.removeEventListener("touchstart", onTouchStart);
+      el.removeEventListener("touchmove",  onTouchMove);
+      el.removeEventListener("touchend",   onTouchEnd);
+      el.removeEventListener("touchcancel",onTouchEnd);
+    };
+  }, []);
+
+  // Mouse support for desktop
+  const mouseDown = useRef(false);
+  const onMouseDown = (e) => { mouseDown.current = true; startX.current = e.clientX; currentX.current = 0; };
+  const onMouseMove = (e) => {
+    if (!mouseDown.current) return;
+    const diff = e.clientX - startX.current;
     currentX.current = diff;
     setOffset(diff);
   };
-  const onEnd = () => {
-    swiping.current = false;
+  const onMouseUp = () => {
+    if (!mouseDown.current) return;
+    mouseDown.current = false;
     if (currentX.current < -80) {
-      setRemoving(true); setOffset(-500); setTimeout(onSwipeLeft, 300);
-    } else if (currentX.current > 80 && onSwipeRight) {
-      currentX.current = 0; setOffset(0);
-      onSwipeRight();
+      setRemoving(true); setOffset(-500); setTimeout(() => onSwipeLeftRef.current?.(), 300);
+    } else if (currentX.current > 80 && onSwipeRightRef.current) {
+      currentX.current = 0; setOffset(0); onSwipeRightRef.current();
     } else {
       currentX.current = 0; setOffset(0);
     }
@@ -137,10 +200,10 @@ function SwipeItem({ children, onSwipeLeft, onSwipeRight, borderRadius = 16 }) {
         </div>
       )}
       <div
-        onTouchStart={onStart} onTouchMove={onMove} onTouchEnd={onEnd}
-        onMouseDown={onStart}  onMouseMove={onMove} onMouseUp={onEnd}
-        onMouseLeave={() => { if (swiping.current) onEnd(); }}
-        style={{ transform: `translateX(${offset}px)`, transition: swiping.current ? "none" : "transform 0.3s ease", opacity: removing ? 0 : 1, cursor: "grab", userSelect: "none" }}
+        ref={innerRef}
+        onMouseDown={onMouseDown} onMouseMove={onMouseMove} onMouseUp={onMouseUp}
+        onMouseLeave={() => { if (mouseDown.current) onMouseUp(); }}
+        style={{ transform: `translateX(${offset}px)`, transition: (swiping.current || mouseDown.current) ? "none" : "transform 0.3s ease", opacity: removing ? 0 : 1, cursor: "grab", userSelect: "none" }}
       >
         {children}
       </div>
@@ -311,7 +374,7 @@ function HouseholdSetup({ userName, onDone, onCancel }) {
 
 // ─── HouseholdPickerScreen ────────────────────────────────────────────────────
 
-function HouseholdPickerScreen({ userName, households, onSelect, onAddHousehold }) {
+function HouseholdPickerScreen({ userName, households, onSelect, onAddHousehold, onDelete }) {
   const HOUSE_COLORS = [
     { bg: "#E3F2FD", icon: "#1565C0" },
     { bg: "#F3E5F5", icon: "#6A1B9A" },
@@ -334,21 +397,24 @@ function HouseholdPickerScreen({ userName, households, onSelect, onAddHousehold 
         {households.map((h, i) => {
           const col = HOUSE_COLORS[i % HOUSE_COLORS.length];
           return (
-            <div
-              key={h.id}
-              onClick={() => onSelect(h.id, h.name)}
-              style={{
-                background: "#fff", borderRadius: 20, padding: "18px 20px", marginBottom: 12,
-                boxShadow: "0 2px 12px rgba(0,0,0,0.06)", cursor: "pointer",
-                display: "flex", alignItems: "center", gap: 16,
-              }}
-            >
-              <div style={{ width: 52, height: 52, borderRadius: 16, background: col.bg, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 26 }}>🏠</div>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 17, fontWeight: 600, color: "#2D3436" }}>{h.name}</div>
-                <div style={{ fontSize: 13, color: "#AAA", marginTop: 2 }}>לחץ להיכנס</div>
-              </div>
-              <div style={{ color: "#CCC", fontSize: 22 }}>‹</div>
+            <div key={h.id} style={{ marginBottom: 12 }}>
+              <SwipeItem onSwipeLeft={() => onDelete(h.id)} borderRadius={20}>
+                <div
+                  onClick={() => onSelect(h.id, h.name)}
+                  style={{
+                    background: "#fff", borderRadius: 20, padding: "18px 20px",
+                    boxShadow: "0 2px 12px rgba(0,0,0,0.06)", cursor: "pointer",
+                    display: "flex", alignItems: "center", gap: 16,
+                  }}
+                >
+                  <div style={{ width: 52, height: 52, borderRadius: 16, background: col.bg, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 26 }}>🏠</div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 17, fontWeight: 600, color: "#2D3436" }}>{h.name}</div>
+                    <div style={{ fontSize: 13, color: "#AAA", marginTop: 2 }}>לחץ להיכנס</div>
+                  </div>
+                  <div style={{ color: "#CCC", fontSize: 22 }}>‹</div>
+                </div>
+              </SwipeItem>
             </div>
           );
         })}
@@ -1483,6 +1549,15 @@ export default function GroceryApp() {
     setScreen("home");
   };
 
+  // ── Delete a household from the picker list ──
+  const deleteHousehold = (id) => {
+    setHouseholds(prev => {
+      const updated = prev.filter(h => h.id !== id);
+      localStorage.setItem("grocery-households", JSON.stringify(updated));
+      return updated;
+    });
+  };
+
   // ── Switch: clears active household → back to picker ──
   const switchHousehold = () => {
     setHouseholdId("");
@@ -1524,6 +1599,7 @@ export default function GroceryApp() {
         households={households}
         onSelect={selectHousehold}
         onAddHousehold={() => setShowAddHousehold(true)}
+        onDelete={deleteHousehold}
       />
     );
   }
