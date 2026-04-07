@@ -541,6 +541,27 @@ function HomeScreen({ userName, householdName, inviteCode, onNavigate, onSwitchH
                 {inviteCode && <span style={{ fontSize: 12, color: "rgba(255,255,255,0.5)", background: "rgba(255,255,255,0.1)", borderRadius: 6, padding: "2px 8px", letterSpacing: 2, fontWeight: 600 }}>{inviteCode}</span>}
               </div>
             )}
+            {inviteCode && (
+              <div style={{ marginTop: 10, display: "flex", gap: 8 }}>
+                <button
+                  onClick={() => {
+                    const msg = `הי! הצטרף/י לבית "${householdName}" באפליקציה שלנו 🏠\nקוד הצטרפות: *${inviteCode}*\nhttps://grocery-app-livid-nu.vercel.app/`;
+                    window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, "_blank");
+                  }}
+                  style={{ display: "flex", alignItems: "center", gap: 6, background: "#25D366", border: "none", borderRadius: 10, padding: "7px 14px", fontSize: 13, fontWeight: 600, color: "#fff", fontFamily: "inherit", cursor: "pointer" }}>
+                  <span style={{ fontSize: 16 }}>💬</span> WhatsApp
+                </button>
+                <button
+                  onClick={() => {
+                    const subject = encodeURIComponent(`הזמנה להצטרף לבית "${householdName}"`);
+                    const body = encodeURIComponent(`הי!\n\nהוזמנת להצטרף לבית "${householdName}" באפליקציה שלנו.\n\nקוד הצטרפות: ${inviteCode}\n\nלינק לאפליקציה: https://grocery-app-livid-nu.vercel.app/\n\nבא לאפליקציה, בחר "הצטרף לקיים" והזן את הקוד.`);
+                    window.open(`mailto:?subject=${subject}&body=${body}`, "_blank");
+                  }}
+                  style={{ display: "flex", alignItems: "center", gap: 6, background: "#EA4335", border: "none", borderRadius: 10, padding: "7px 14px", fontSize: 13, fontWeight: 600, color: "#fff", fontFamily: "inherit", cursor: "pointer" }}>
+                  <span style={{ fontSize: 16 }}>✉️</span> Gmail
+                </button>
+              </div>
+            )}
           </div>
           {onSwitchHousehold && (
             <button onClick={onSwitchHousehold} style={{ background: "rgba(255,255,255,0.12)", border: "none", borderRadius: 10, padding: "8px 12px", fontSize: 12, color: "rgba(255,255,255,0.75)", fontFamily: "inherit", cursor: "pointer", marginTop: 4 }}>
