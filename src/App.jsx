@@ -1535,7 +1535,6 @@ export default function GroceryApp() {
       const snap = await getDoc(doc(db, "households", id));
       if (snap.exists()) setInviteCode(snap.data().inviteCode || "");
     } catch (e) { console.error("Failed to load invite code:", e); }
-    await migrateExistingData(id);
   };
 
   // ── Select an existing household from the picker ──
