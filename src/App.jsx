@@ -465,6 +465,7 @@ function HouseholdPickerScreen({ userName, households, onSelect, onAddHousehold,
 
 function HomeScreen({ userName, householdName, inviteCode, onNavigate, onSwitchHousehold, householdId }) {
   const storageKey = `module-order-${householdId}`;
+  const [showInvite, setShowInvite] = useState(false);
   const [moduleOrder, setModuleOrder] = useState(() => {
     try {
       const saved = localStorage.getItem(storageKey);
@@ -536,38 +537,23 @@ function HomeScreen({ userName, householdName, inviteCode, onNavigate, onSwitchH
             <p style={{ margin: "0 0 6px", fontSize: 14, color: "rgba(255,255,255,0.55)", fontWeight: 300 }}>👋 שלום, {userName}</p>
             <h1 style={{ margin: 0, fontSize: 28, fontWeight: 700, color: "#fff" }}>מה נפתח?</h1>
             {householdName && (
-              <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 8 }}>
                 <span style={{ fontSize: 13, color: "rgba(255,255,255,0.75)", fontWeight: 400 }}>🏠 {householdName}</span>
-                {inviteCode && <span style={{ fontSize: 12, color: "rgba(255,255,255,0.5)", background: "rgba(255,255,255,0.1)", borderRadius: 6, padding: "2px 8px", letterSpacing: 2, fontWeight: 600 }}>{inviteCode}</span>}
-              </div>
-            )}
-            {inviteCode && (
-              <div style={{ marginTop: 10, display: "flex", gap: 8 }}>
-                <button
-                  onClick={() => {
-                    const msg = `הי! הצטרף/י לבית "${householdName}" באפליקציה שלנו 🏠\nקוד הצטרפות: *${inviteCode}*\nhttps://grocery-app-livid-nu.vercel.app/`;
-                    window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, "_blank");
-                  }}
-                  style={{ display: "flex", alignItems: "center", gap: 6, background: "#25D366", border: "none", borderRadius: 10, padding: "7px 14px", fontSize: 13, fontWeight: 600, color: "#fff", fontFamily: "inherit", cursor: "pointer" }}>
-                  <span style={{ fontSize: 16 }}>💬</span> WhatsApp
-                </button>
-                <button
-                  onClick={() => {
-                    const subject = encodeURIComponent(`הזמנה להצטרף לבית "${householdName}"`);
-                    const body = encodeURIComponent(`הי!\n\nהוזמנת להצטרף לבית "${householdName}" באפליקציה שלנו.\n\nקוד הצטרפות: ${inviteCode}\n\nלינק לאפליקציה: https://grocery-app-livid-nu.vercel.app/\n\nבא לאפליקציה, בחר "הצטרף לקיים" והזן את הקוד.`);
-                    window.open(`mailto:?subject=${subject}&body=${body}`, "_blank");
-                  }}
-                  style={{ display: "flex", alignItems: "center", gap: 6, background: "#EA4335", border: "none", borderRadius: 10, padding: "7px 14px", fontSize: 13, fontWeight: 600, color: "#fff", fontFamily: "inherit", cursor: "pointer" }}>
-                  <span style={{ fontSize: 16 }}>✉️</span> Gmail
-                </button>
               </div>
             )}
           </div>
-          {onSwitchHousehold && (
-            <button onClick={onSwitchHousehold} style={{ background: "rgba(255,255,255,0.12)", border: "none", borderRadius: 10, padding: "8px 12px", fontSize: 12, color: "rgba(255,255,255,0.75)", fontFamily: "inherit", cursor: "pointer", marginTop: 4 }}>
-              החלף 🔄
-            </button>
-          )}
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8 }}>
+            {onSwitchHousehold && (
+              <button onClick={onSwitchHousehold} style={{ background: "rgba(255,255,255,0.12)", border: "none", borderRadius: 10, padding: "8px 12px", fontSize: 12, color: "rgba(255,255,255,0.75)", fontFamily: "inherit", cursor: "pointer" }}>
+                החלף 🔄
+              </button>
+            )}
+            {inviteCode && (
+              <button onClick={() => setShowInvite(true)} style={{ background: "rgba(255,255,255,0.15)", border: "none", borderRadius: 10, padding: "8px 12px", fontSize: 12, color: "#fff", fontFamily: "inherit", cursor: "pointer", fontWeight: 600 }}>
+                הזמן +
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
@@ -617,6 +603,43 @@ function HomeScreen({ userName, householdName, inviteCode, onNavigate, onSwitchH
           );
         })}
       </div>
+
+      {/* Invite modal */}
+      {showInvite && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 100, display: "flex", alignItems: "flex-end", justifyContent: "center" }} onClick={(e) => { if (e.target === e.currentTarget) setShowInvite(false); }}>
+          <div dir="rtl" style={{ background: "#fff", borderRadius: "24px 24px 0 0", padding: 28, width: "100%", maxWidth: 480, animation: "slideUp 0.3s ease" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+              <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: "#2D3436" }}>הזמן לבית</h3>
+              <button onClick={() => setShowInvite(false)} style={{ background: "none", border: "none", fontSize: 22, cursor: "pointer", color: "#999", lineHeight: 1 }}>✕</button>
+            </div>
+            <p style={{ margin: "0 0 20px", fontSize: 14, color: "#888" }}>שתף את קוד ההצטרפות עם בני המשפחה</p>
+            <div style={{ background: "#F5F2EF", borderRadius: 14, padding: "14px 20px", textAlign: "center", marginBottom: 20 }}>
+              <p style={{ margin: "0 0 4px", fontSize: 12, color: "#AAA" }}>קוד הצטרפות</p>
+              <div style={{ fontSize: 32, fontWeight: 700, letterSpacing: 8, color: "#2D3436" }}>{inviteCode}</div>
+            </div>
+            <div style={{ display: "flex", gap: 12 }}>
+              <button
+                onClick={() => {
+                  const msg = `הי! הצטרף/י לבית "${householdName}" באפליקציה שלנו 🏠\nקוד הצטרפות: *${inviteCode}*\nhttps://grocery-app-livid-nu.vercel.app/`;
+                  window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, "_blank");
+                }}
+                style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, background: "#25D366", border: "none", borderRadius: 14, padding: "14px", fontSize: 15, fontWeight: 600, color: "#fff", fontFamily: "inherit", cursor: "pointer" }}>
+                <span style={{ fontSize: 20 }}>💬</span> WhatsApp
+              </button>
+              <button
+                onClick={() => {
+                  const subject = encodeURIComponent(`הזמנה להצטרף לבית "${householdName}"`);
+                  const body = encodeURIComponent(`הי!\n\nהוזמנת להצטרף לבית "${householdName}" באפליקציה שלנו.\n\nקוד הצטרפות: ${inviteCode}\n\nלינק לאפליקציה:\nhttps://grocery-app-livid-nu.vercel.app/\n\nפתח את האפליקציה, בחר "הצטרף לקיים" והזן את הקוד.`);
+                  window.open(`mailto:?subject=${subject}&body=${body}`, "_blank");
+                }}
+                style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, background: "#EA4335", border: "none", borderRadius: 14, padding: "14px", fontSize: 15, fontWeight: 600, color: "#fff", fontFamily: "inherit", cursor: "pointer" }}>
+                <span style={{ fontSize: 20 }}>✉️</span> אימייל
+              </button>
+            </div>
+            <div style={{ paddingBottom: 8 }} />
+          </div>
+        </div>
+      )}
     </div>
   );
 }
