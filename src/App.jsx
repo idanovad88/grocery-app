@@ -1823,19 +1823,32 @@ function getDaysUntilRenewal(dateStr) {
 }
 
 function SubscriptionsScreen({ userName, householdId, onBack }) {
-  const [subs, setSubs]           = useState([]);
-  const [loading, setLoading]     = useState(true);
-  const [showAdd, setShowAdd]     = useState(false);
-  const [name, setName]           = useState("");
-  const [customIcon, setCustomIcon] = useState("📺");
-  const [price, setPrice]         = useState("");
+  const MAX_FILE_SIZE = 5 * 1024 * 1024;
+  const [subs, setSubs]               = useState([]);
+  const [loading, setLoading]         = useState(true);
+  const [showAdd, setShowAdd]         = useState(false);
+  const [name, setName]               = useState("");
+  const [customIcon, setCustomIcon]   = useState("📺");
+  const [price, setPrice]             = useState("");
   const [renewalDate, setRenewalDate] = useState("");
-  const [pendingDelete, setPendingDelete] = useState(null);
-  const [editingSub, setEditingSub]       = useState(null);
-  const [editName, setEditName]           = useState("");
-  const [editIcon, setEditIcon]           = useState("📺");
-  const [editPrice, setEditPrice]         = useState("");
-  const [editRenewalDate, setEditRenewalDate] = useState("");
+  const [file, setFile]               = useState(null);
+  const [filePreview, setFilePreview] = useState(null);
+  const [fileError, setFileError]     = useState(null);
+  const [uploading, setUploading]     = useState(false);
+  const fileInputRef                  = useRef(null);
+  const [lightboxSrc, setLightboxSrc] = useState(null);
+
+  const [pendingDelete, setPendingDelete]       = useState(null);
+  const [editingSub, setEditingSub]             = useState(null);
+  const [editName, setEditName]                 = useState("");
+  const [editIcon, setEditIcon]                 = useState("📺");
+  const [editPrice, setEditPrice]               = useState("");
+  const [editRenewalDate, setEditRenewalDate]   = useState("");
+  const [editFile, setEditFile]                 = useState(null);
+  const [editFilePreview, setEditFilePreview]   = useState(null);
+  const [editFileError, setEditFileError]       = useState(null);
+  const [editUploading, setEditUploading]       = useState(false);
+  const editFileInputRef                        = useRef(null);
 
   useEffect(() => {
     const q = query(collection(db, "households", householdId, "subscriptions"), orderBy("renewalDate", "asc"));
@@ -1843,11 +1856,42 @@ function SubscriptionsScreen({ userName, householdId, onBack }) {
     return () => unsub();
   }, [householdId]);
 
+  const handleFileChange = (e) => {
+    const f = e.target.files[0];
+    if (!f) return;
+    if (f.size > MAX_FILE_SIZE) { setFileError(`הקובץ גדול מדי — מקסימום 5MB`); e.target.value = ""; return; }
+    setFileError(null); setFile(f);
+    if (f.type.startsWith("image/")) { const r = new FileReader(); r.onload = (ev) => setFilePreview(ev.target.result); r.readAsDataURL(f); }
+    else setFilePreview("pdf");
+  };
+
+  const handleEditFileChange = (e) => {
+    const f = e.target.files[0];
+    if (!f) return;
+    if (f.size > MAX_FILE_SIZE) { setEditFileError(`הקובץ גדול מדי — מקסימום 5MB`); e.target.value = ""; return; }
+    setEditFileError(null); setEditFile(f);
+    if (f.type.startsWith("image/")) { const r = new FileReader(); r.onload = (ev) => setEditFilePreview(ev.target.result); r.readAsDataURL(f); }
+    else setEditFilePreview("pdf");
+  };
+
+  const resetForm = () => { setName(""); setCustomIcon("📺"); setPrice(""); setRenewalDate(""); setFile(null); setFilePreview(null); setFileError(null); setShowAdd(false); };
+
   const addSub = async () => {
     if (!name.trim()) return;
-    try { await addDoc(collection(db, "households", householdId, "subscriptions"), { name: name.trim(), icon: customIcon, price: price.trim(), renewalDate, addedBy: userName, date: new Date().toISOString() }); }
-    catch (e) { console.error(e); }
-    setName(""); setCustomIcon("📺"); setPrice(""); setRenewalDate(""); setShowAdd(false);
+    setUploading(true);
+    try {
+      let fileUrl = "", filePath = "", fileType = "";
+      if (file) {
+        filePath = `subscriptions/${Date.now()}_${file.name}`;
+        const sRef = ref(storage, filePath);
+        await uploadBytes(sRef, file, { contentType: file.type });
+        fileUrl = await getDownloadURL(sRef);
+        fileType = file.type;
+      }
+      await addDoc(collection(db, "households", householdId, "subscriptions"), { name: name.trim(), icon: customIcon, price: price.trim(), renewalDate, fileUrl, filePath, fileType, addedBy: userName, date: new Date().toISOString() });
+      resetForm();
+    } catch (e) { console.error(e); }
+    setUploading(false);
   };
 
   const removeSub = (id, subData) => {
@@ -1861,12 +1905,32 @@ function SubscriptionsScreen({ userName, householdId, onBack }) {
 
   const undoDelete = () => { if (pendingDelete) { clearTimeout(pendingDelete.timerId); setPendingDelete(null); } };
 
-  const openEdit = (s) => { setEditingSub(s); setEditName(s.name); setEditIcon(s.icon || "📺"); setEditPrice(s.price || ""); setEditRenewalDate(s.renewalDate || ""); };
-  const closeEdit = () => setEditingSub(null);
+  const openEdit = (s) => {
+    setEditingSub(s); setEditName(s.name); setEditIcon(s.icon || "📺");
+    setEditPrice(s.price || ""); setEditRenewalDate(s.renewalDate || "");
+    setEditFile(null); setEditFileError(null);
+    setEditFilePreview(s.fileUrl ? (s.fileType?.startsWith("image/") ? s.fileUrl : "pdf") : null);
+  };
+  const closeEdit = () => { setEditingSub(null); setEditFile(null); setEditFilePreview(null); setEditFileError(null); };
+
   const updateSub = async () => {
     if (!editName.trim()) return;
-    try { await updateDoc(doc(db, "households", householdId, "subscriptions", editingSub.id), { name: editName.trim(), icon: editIcon, price: editPrice.trim(), renewalDate: editRenewalDate }); closeEdit(); }
-    catch (e) { console.error(e); }
+    setEditUploading(true);
+    try {
+      let fileUrl  = editingSub.fileUrl  || "";
+      let filePath = editingSub.filePath || "";
+      let fileType = editingSub.fileType || "";
+      if (editFile) {
+        filePath = `subscriptions/${Date.now()}_${editFile.name}`;
+        const sRef = ref(storage, filePath);
+        await uploadBytes(sRef, editFile, { contentType: editFile.type });
+        fileUrl = await getDownloadURL(sRef);
+        fileType = editFile.type;
+      }
+      await updateDoc(doc(db, "households", householdId, "subscriptions", editingSub.id), { name: editName.trim(), icon: editIcon, price: editPrice.trim(), renewalDate: editRenewalDate, fileUrl, filePath, fileType });
+      closeEdit();
+    } catch (e) { console.error(e); }
+    setEditUploading(false);
   };
 
   const selectPreset = (preset) => { setName(preset.name); setCustomIcon(preset.icon); };
@@ -1878,6 +1942,27 @@ function SubscriptionsScreen({ userName, householdId, onBack }) {
   const totalMonthly = subs.reduce((sum, s) => sum + (parseFloat(s.price) || 0), 0);
 
   if (loading) return <Loader />;
+
+  const FileArea = ({ preview, f, inputRef, onChange, onClear, error, accentColor }) => (
+    <div style={{ marginTop: 10 }}>
+      <input ref={inputRef} type="file" accept="image/*,application/pdf" onChange={onChange} style={{ display: "none" }} />
+      {preview ? (
+        <div style={{ position: "relative" }}>
+          {preview === "pdf"
+            ? <div style={{ background: "#E0F2F1", borderRadius: 12, padding: 14, textAlign: "center", color: accentColor, fontSize: 14 }}>📄 {f?.name || "קובץ מצורף"}</div>
+            : <img src={preview} alt="preview" onClick={() => setLightboxSrc(preview)} style={{ width: "100%", borderRadius: 12, maxHeight: 160, objectFit: "cover", cursor: "zoom-in" }} />
+          }
+          <button onClick={onClear} style={{ position: "absolute", top: 8, left: 8, background: "rgba(0,0,0,0.5)", color: "#fff", border: "none", borderRadius: "50%", width: 28, height: 28, cursor: "pointer", fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
+        </div>
+      ) : (
+        <button onClick={() => inputRef.current.click()}
+          style={{ width: "100%", border: `2px dashed ${error ? "#E53935" : "#E8E5E0"}`, background: error ? "#FFF5F5" : "#FAFAFA", borderRadius: 12, padding: 14, cursor: "pointer", fontSize: 14, color: error ? "#E53935" : "#AAA", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+          📎 צרף הסכם / תמונה (אופציונלי)
+        </button>
+      )}
+      {error && <p style={{ margin: "6px 0 0", fontSize: 12, color: "#E53935", fontWeight: 500 }}>⚠️ {error}</p>}
+    </div>
+  );
 
   return (
     <div dir="rtl" style={{ fontFamily: "'Rubik', sans-serif", maxWidth: 480, margin: "0 auto", minHeight: "100vh", background: "linear-gradient(165deg, #FAFAFA 0%, #F0EDE8 100%)" }}>
@@ -1899,8 +1984,6 @@ function SubscriptionsScreen({ userName, householdId, onBack }) {
         {showAdd && (
           <div style={{ background: "#fff", borderRadius: 20, padding: 20, marginBottom: 16, boxShadow: "0 4px 20px rgba(0,0,0,0.08)", animation: "slideDown 0.3s ease" }}>
             <h3 style={{ margin: "0 0 12px", fontSize: 16, fontWeight: 600, color: "#2D3436" }}>מנוי חדש</h3>
-
-            {/* Presets */}
             <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 14 }}>
               {SUB_PRESETS.map(p => (
                 <button key={p.name} onClick={() => selectPreset(p)}
@@ -1909,10 +1992,8 @@ function SubscriptionsScreen({ userName, householdId, onBack }) {
                 </button>
               ))}
             </div>
-
             <input value={name} onChange={(e) => setName(e.target.value)} placeholder="שם המנוי *"
               style={inputStyle} onFocus={(e) => (e.target.style.borderColor = SUB_GREEN)} onBlur={(e) => (e.target.style.borderColor = "#E8E5E0")} />
-
             <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
               <div style={{ flex: 1 }}>
                 <p style={{ margin: "0 0 6px", fontSize: 13, color: "#888" }}>מחיר חודשי (₪)</p>
@@ -1925,13 +2006,13 @@ function SubscriptionsScreen({ userName, householdId, onBack }) {
                   style={{ ...inputStyle, color: renewalDate ? "#2D3436" : "#CCC" }} onFocus={(e) => (e.target.style.borderColor = SUB_GREEN)} onBlur={(e) => (e.target.style.borderColor = "#E8E5E0")} />
               </div>
             </div>
-
+            <FileArea preview={filePreview} f={file} inputRef={fileInputRef} onChange={handleFileChange} onClear={() => { setFile(null); setFilePreview(null); }} error={fileError} accentColor={SUB_GREEN} />
             <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
-              <button onClick={addSub} disabled={!name.trim()}
-                style={{ flex: 1, border: "none", background: name.trim() ? `linear-gradient(135deg, ${SUB_GREEN}, ${SUB_DARK})` : "#ccc", color: "#fff", borderRadius: 12, padding: "14px", fontSize: 15, fontWeight: 600, fontFamily: "inherit", cursor: name.trim() ? "pointer" : "default" }}>
-                שמור ✓
+              <button onClick={addSub} disabled={!name.trim() || uploading}
+                style={{ flex: 1, border: "none", background: name.trim() && !uploading ? `linear-gradient(135deg, ${SUB_GREEN}, ${SUB_DARK})` : "#ccc", color: "#fff", borderRadius: 12, padding: "14px", fontSize: 15, fontWeight: 600, fontFamily: "inherit", cursor: name.trim() && !uploading ? "pointer" : "default" }}>
+                {uploading ? "מעלה..." : "שמור ✓"}
               </button>
-              <button onClick={() => { setShowAdd(false); setName(""); setCustomIcon("📺"); setPrice(""); setRenewalDate(""); }}
+              <button onClick={resetForm}
                 style={{ border: "2px solid #E8E5E0", background: "#fff", color: "#999", borderRadius: 12, padding: "14px 20px", fontSize: 15, fontFamily: "inherit", cursor: "pointer" }}>✕</button>
             </div>
           </div>
@@ -1949,35 +2030,50 @@ function SubscriptionsScreen({ userName, householdId, onBack }) {
 
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           {sorted.map((s) => {
-            const days     = getDaysUntilRenewal(s.renewalDate);
-            const isToday  = days === 0;
-            const isSoon   = days > 0 && days <= 7;
+            const days      = getDaysUntilRenewal(s.renewalDate);
+            const isToday   = days === 0;
+            const isSoon    = days > 0 && days <= 7;
             const isExpired = days < 0;
+            const isPdf     = s.fileType === "application/pdf" || s.filePath?.toLowerCase().endsWith(".pdf");
             return (
               <SwipeItem key={s.id} borderRadius={18} onSwipeLeft={() => removeSub(s.id, s)} onSwipeRight={() => openEdit(s)}>
-                <div style={{ background: "#fff", borderRadius: 18, padding: "16px 18px", boxShadow: "0 2px 12px rgba(0,0,0,0.06)", display: "flex", alignItems: "center", gap: 14, border: isExpired ? "2px solid #E53935" : isToday ? `2px solid ${SUB_GREEN}` : "2px solid transparent" }}>
-                  <div style={{ width: 48, height: 48, borderRadius: 14, background: isExpired ? "#FFEBEE" : isToday ? "#E0F2F1" : isSoon ? "#FFF3E0" : "#F5F5F5", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 24, flexShrink: 0 }}>
-                    {s.icon || "📺"}
-                  </div>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: 16, fontWeight: 600, color: "#2D3436" }}>{s.name}</div>
-                    <div style={{ fontSize: 13, color: "#AAA", marginTop: 2 }}>
-                      {s.price ? `₪${s.price}/חודש` : ""}
-                      {s.price && s.renewalDate ? " · " : ""}
-                      {s.renewalDate ? `חידוש ${new Date(s.renewalDate).toLocaleDateString("he-IL")}` : ""}
+                <div style={{ background: "#fff", borderRadius: 18, overflow: "hidden", boxShadow: "0 2px 12px rgba(0,0,0,0.06)", border: isExpired ? "2px solid #E53935" : isToday ? `2px solid ${SUB_GREEN}` : "2px solid transparent" }}>
+                  {s.fileUrl && (
+                    isPdf ? (
+                      <a href={s.fileUrl} target="_blank" rel="noopener noreferrer"
+                        style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, height: 52, background: "#E0F2F1", textDecoration: "none" }}>
+                        <span style={{ fontSize: 20 }}>📄</span>
+                        <span style={{ color: SUB_GREEN, fontWeight: 600, fontSize: 13 }}>פתח הסכם PDF</span>
+                        <span style={{ fontSize: 12, color: "#80CBC4" }}>↗</span>
+                      </a>
+                    ) : (
+                      <img src={s.fileUrl} alt={s.name} onClick={(e) => { e.stopPropagation(); setLightboxSrc(s.fileUrl); }} style={{ width: "100%", height: 110, objectFit: "cover", cursor: "zoom-in" }} />
+                    )
+                  )}
+                  <div style={{ padding: "14px 16px", display: "flex", alignItems: "center", gap: 14 }}>
+                    <div style={{ width: 44, height: 44, borderRadius: 12, background: isExpired ? "#FFEBEE" : isToday ? "#E0F2F1" : isSoon ? "#FFF3E0" : "#F5F5F5", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, flexShrink: 0 }}>
+                      {s.icon || "📺"}
                     </div>
-                  </div>
-                  <div style={{ flexShrink: 0 }}>
-                    {isExpired
-                      ? <span style={{ fontSize: 12, fontWeight: 700, color: "#E53935", background: "#FFEBEE", padding: "4px 10px", borderRadius: 10 }}>פג תוקף</span>
-                      : isToday
-                        ? <span style={{ fontSize: 12, fontWeight: 700, color: SUB_GREEN, background: "#E0F2F1", padding: "4px 10px", borderRadius: 10 }}>היום!</span>
-                        : isSoon
-                          ? <span style={{ fontSize: 12, fontWeight: 700, color: "#E65100", background: "#FFF3E0", padding: "4px 10px", borderRadius: 10 }}>בעוד {days}י׳</span>
-                          : s.renewalDate
-                            ? <span style={{ fontSize: 12, color: "#BBB" }}>בעוד {days}י׳</span>
-                            : null
-                    }
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 16, fontWeight: 600, color: "#2D3436" }}>{s.name}</div>
+                      <div style={{ fontSize: 13, color: "#AAA", marginTop: 2 }}>
+                        {s.price ? `₪${s.price}/חודש` : ""}
+                        {s.price && s.renewalDate ? " · " : ""}
+                        {s.renewalDate ? `חידוש ${new Date(s.renewalDate).toLocaleDateString("he-IL")}` : ""}
+                      </div>
+                    </div>
+                    <div style={{ flexShrink: 0 }}>
+                      {isExpired
+                        ? <span style={{ fontSize: 12, fontWeight: 700, color: "#E53935", background: "#FFEBEE", padding: "4px 10px", borderRadius: 10 }}>פג תוקף</span>
+                        : isToday
+                          ? <span style={{ fontSize: 12, fontWeight: 700, color: SUB_GREEN, background: "#E0F2F1", padding: "4px 10px", borderRadius: 10 }}>היום!</span>
+                          : isSoon
+                            ? <span style={{ fontSize: 12, fontWeight: 700, color: "#E65100", background: "#FFF3E0", padding: "4px 10px", borderRadius: 10 }}>בעוד {days}י׳</span>
+                            : s.renewalDate
+                              ? <span style={{ fontSize: 12, color: "#BBB" }}>בעוד {days}י׳</span>
+                              : null
+                      }
+                    </div>
                   </div>
                 </div>
               </SwipeItem>
@@ -1987,6 +2083,8 @@ function SubscriptionsScreen({ userName, householdId, onBack }) {
       </div>
 
       {!showAdd && <FAB onClick={() => setShowAdd(true)} color={`linear-gradient(135deg, ${SUB_GREEN}, ${SUB_DARK})`} shadow="rgba(0,137,123,0.4)" />}
+
+      <ImageLightbox src={lightboxSrc} onClose={() => setLightboxSrc(null)} />
 
       {/* Undo Delete Toast */}
       {pendingDelete && (
@@ -1999,7 +2097,7 @@ function SubscriptionsScreen({ userName, householdId, onBack }) {
       {/* Edit Modal */}
       {editingSub && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 100, display: "flex", alignItems: "flex-end", justifyContent: "center" }} onClick={(e) => { if (e.target === e.currentTarget) closeEdit(); }}>
-          <div dir="rtl" style={{ background: "#fff", borderRadius: "24px 24px 0 0", padding: 24, width: "100%", maxWidth: 480, animation: "slideUp 0.3s ease" }}>
+          <div dir="rtl" style={{ background: "#fff", borderRadius: "24px 24px 0 0", padding: 24, width: "100%", maxWidth: 480, maxHeight: "90vh", overflowY: "auto", animation: "slideUp 0.3s ease" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
               <h3 style={{ margin: 0, fontSize: 17, fontWeight: 600, color: "#2D3436" }}>✏️ עריכת מנוי</h3>
               <button onClick={closeEdit} style={{ background: "none", border: "none", fontSize: 22, cursor: "pointer", color: "#999", lineHeight: 1 }}>✕</button>
@@ -2018,10 +2116,11 @@ function SubscriptionsScreen({ userName, householdId, onBack }) {
                   style={{ ...inputStyle, color: editRenewalDate ? "#2D3436" : "#CCC" }} onFocus={(e) => (e.target.style.borderColor = SUB_GREEN)} onBlur={(e) => (e.target.style.borderColor = "#E8E5E0")} />
               </div>
             </div>
+            <FileArea preview={editFilePreview} f={editFile} inputRef={editFileInputRef} onChange={handleEditFileChange} onClear={() => { setEditFile(null); setEditFilePreview(null); }} error={editFileError} accentColor={SUB_GREEN} />
             <div style={{ display: "flex", gap: 8, marginTop: 16, paddingBottom: 8 }}>
-              <button onClick={updateSub} disabled={!editName.trim()}
-                style={{ flex: 1, border: "none", background: editName.trim() ? `linear-gradient(135deg, ${SUB_GREEN}, ${SUB_DARK})` : "#ccc", color: "#fff", borderRadius: 12, padding: "14px", fontSize: 15, fontWeight: 600, fontFamily: "inherit", cursor: editName.trim() ? "pointer" : "default" }}>
-                שמור שינויים ✓
+              <button onClick={updateSub} disabled={!editName.trim() || editUploading}
+                style={{ flex: 1, border: "none", background: editName.trim() && !editUploading ? `linear-gradient(135deg, ${SUB_GREEN}, ${SUB_DARK})` : "#ccc", color: "#fff", borderRadius: 12, padding: "14px", fontSize: 15, fontWeight: 600, fontFamily: "inherit", cursor: editName.trim() && !editUploading ? "pointer" : "default" }}>
+                {editUploading ? "שומר..." : "שמור שינויים ✓"}
               </button>
               <button onClick={closeEdit}
                 style={{ border: "2px solid #E8E5E0", background: "#fff", color: "#999", borderRadius: 12, padding: "14px 20px", fontSize: 15, fontFamily: "inherit", cursor: "pointer" }}>✕</button>
