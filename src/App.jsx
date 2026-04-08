@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { initializeApp } from "firebase/app";
-import { getFirestore, collection, addDoc, deleteDoc, updateDoc, doc, getDoc, onSnapshot, query, orderBy, getDocs, where, setDoc } from "firebase/firestore";
+import { getFirestore, collection, addDoc, deleteDoc, updateDoc, doc, getDoc, onSnapshot, query, orderBy, getDocs, where, setDoc, arrayUnion } from "firebase/firestore";
 import { getAuth, signInAnonymously } from "firebase/auth";
 import { getStorage, ref, uploadBytes, getDownloadURL } from "firebase/storage";
 
@@ -257,7 +257,13 @@ function HouseholdSetup({ userName, onDone, onCancel }) {
       if (!auth.currentUser) await signInAnonymously(auth);
       const inviteCode = generateCode();
       const newRef = doc(collection(db, "households"));
-      await setDoc(newRef, { name: name.trim(), inviteCode, createdBy: userName, createdAt: new Date().toISOString() });
+      await setDoc(newRef, {
+        name: name.trim(),
+        inviteCode,
+        createdBy: userName,
+        createdAt: new Date().toISOString(),
+        members: [auth.currentUser.uid],
+      });
       setCreatedCode(inviteCode);
       setCreatedId(newRef.id);
       setCreatedName(name.trim());
@@ -284,6 +290,16 @@ function HouseholdSetup({ userName, onDone, onCancel }) {
       const snap = await getDocs(q);
       if (snap.empty) { setError("קוד לא נמצא. בדוק שוב."); setLoading(false); return; }
       const hDoc = snap.docs[0];
+      // Add the current user to the members array (idempotent via arrayUnion).
+      // Without this, Firestore rules will reject subsequent reads/writes.
+      try {
+        await updateDoc(hDoc.ref, { members: arrayUnion(auth.currentUser.uid) });
+      } catch (e) {
+        console.error("Failed to add member:", e);
+        setError("שגיאה בהצטרפות. נסה שוב.");
+        setLoading(false);
+        return;
+      }
       onDone(hDoc.id, hDoc.data().name);
     } catch (e) { setError("שגיאה בחיבור. נסה שוב."); console.error(e); }
     setLoading(false);
@@ -2301,6 +2317,18 @@ export default function GroceryApp() {
     setHouseholdId(id);
     setHouseholdName(name);
     try {
+      // Self-heal membership: ensures the current uid is in the household's
+      // members array. Necessary for legacy households created before the
+      // membership model existed, and harmless otherwise (arrayUnion is
+      // idempotent). Without this, Firestore rules will reject subcollection
+      // reads for households that were created before members tracking.
+      if (auth.currentUser) {
+        try {
+          await updateDoc(doc(db, "households", id), { members: arrayUnion(auth.currentUser.uid) });
+        } catch (e) {
+          console.error("Failed to ensure membership:", e);
+        }
+      }
       const snap = await getDoc(doc(db, "households", id));
       if (snap.exists()) setInviteCode(snap.data().inviteCode || "");
     } catch (e) { console.error("Failed to load invite code:", e); }
