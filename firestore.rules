@@ -1,0 +1,170 @@
+rules_version = '2';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// grocery-app Firestore rules — membership-enforced
+//
+// Architecture:
+//   • Users authenticate anonymously (signInAnonymously).
+//   • Each /households/{hid} doc has a `members: [uid, ...]` array.
+//   • Subcollections (items, coupons, insurance, birthdays, subscriptions)
+//     can only be accessed by users whose uid is in the parent household's
+//     members array.
+//   • Join flow: the client queries households by inviteCode (list), then
+//     updates the matched doc with arrayUnion(uid). The update rule allows
+//     this narrow "add yourself" operation.
+//
+// Known limitation (documented, accepted):
+//   A signed-in user who knows a household ID can still add themselves to
+//   that household (the join update rule can't verify the client knows the
+//   invite code). This is stronger than the previous model where any ID
+//   holder could read/write anything, and it at least makes new members
+//   visible in the members array. A future tightening (cloud function that
+//   verifies inviteCode server-side) is outlined at the bottom of this file.
+// ─────────────────────────────────────────────────────────────────────────────
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isString(v, maxLen) {
+      return v is string && v.size() > 0 && v.size() <= maxLen;
+    }
+
+    // Members list of the household doc currently being matched (use inside
+    // /households/{hid} rules). Defaults to empty if field is missing.
+    function resourceMembers() {
+      return resource.data.get('members', []);
+    }
+
+    // Members list of a specific household (use inside subcollection rules).
+    function householdMembers(hid) {
+      return get(/databases/$(database)/documents/households/$(hid)).data.get('members', []);
+    }
+
+    function isMember(hid) {
+      return signedIn() && request.auth.uid in householdMembers(hid);
+    }
+
+    // "Self-join" check for /households/{hid} updates: the only change is
+    // to the members array, and the caller's uid ends up in the new list.
+    // Used to let a new user add themselves without already being a member.
+    function isSelfJoinUpdate() {
+      return signedIn()
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['members'])
+          && request.auth.uid in request.resource.data.members;
+    }
+
+    // Full-member update: caller is already a member. Members may rotate
+    // the invite code (inviteCode + inviteCodeExpiry), rename the household,
+    // and update the members array. createdBy and createdAt remain immutable.
+    function isMemberUpdate() {
+      return signedIn()
+          && request.auth.uid in resourceMembers()
+          && request.resource.data.createdBy == resource.data.createdBy
+          && request.resource.data.createdAt == resource.data.createdAt;
+    }
+
+    // ── Households ──────────────────────────────────────────────────────────
+    match /households/{hid} {
+
+      // get: members only. (Non-members cannot read household metadata.)
+      // Legacy docs with an empty members array are treated as inaccessible
+      // until a client self-heals by calling the join update.
+      allow get: if signedIn() && request.auth.uid in resourceMembers();
+
+      // list: needed for the join-by-inviteCode query. Any signed-in user
+      // can list — the query itself is filtered by inviteCode. Limit page
+      // size to cap abuse. Results returned by list are always the full
+      // doc regardless of `get` rules; this means anyone signed-in can
+      // enumerate households with a large enough cap, so we keep it small.
+      allow list: if signedIn() && request.query.limit <= 20;
+
+      // create: caller must be in members, and only one member (themselves).
+      allow create: if signedIn()
+                    && request.resource.data.keys().hasOnly(
+                         ['name','inviteCode','inviteCodeExpiry','createdBy','createdAt','members']
+                       )
+                    && isString(request.resource.data.name, 60)
+                    && isString(request.resource.data.inviteCode, 10)
+                    && isString(request.resource.data.inviteCodeExpiry, 40)
+                    && isString(request.resource.data.createdBy, 60)
+                    && isString(request.resource.data.createdAt, 40)
+                    && request.resource.data.members is list
+                    && request.resource.data.members.size() == 1
+                    && request.auth.uid in request.resource.data.members;
+
+      // update: either a member doing a normal edit, OR a non-member
+      // performing a self-join (adding their uid to members).
+      allow update: if isMemberUpdate() || isSelfJoinUpdate();
+
+      // delete: members only.
+      allow delete: if signedIn() && request.auth.uid in resourceMembers();
+
+      // ── Subcollections — members only ─────────────────────────────────────
+      match /items/{itemId} {
+        allow read:   if isMember(hid);
+        allow create: if isMember(hid) && isString(request.resource.data.name, 200);
+        allow update, delete: if isMember(hid);
+      }
+
+      match /coupons/{couponId} {
+        allow read:   if isMember(hid);
+        allow create: if isMember(hid) && isString(request.resource.data.title, 200);
+        allow update, delete: if isMember(hid);
+      }
+
+      match /insurance/{docId} {
+        allow read:   if isMember(hid);
+        allow create: if isMember(hid) && isString(request.resource.data.title, 200);
+        allow update, delete: if isMember(hid);
+      }
+
+      match /birthdays/{bid} {
+        allow read:   if isMember(hid);
+        allow create: if isMember(hid) && isString(request.resource.data.name, 100);
+        allow update, delete: if isMember(hid);
+      }
+
+      match /subscriptions/{sid} {
+        allow read:   if isMember(hid);
+        allow create: if isMember(hid) && isString(request.resource.data.name, 200);
+        allow update, delete: if isMember(hid);
+      }
+    }
+
+    // Deny everything else (legacy root-level collections, etc.)
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// FUTURE: tighten the self-join rule with a Cloud Function
+//
+// The isSelfJoinUpdate rule lets any signed-in user who knows a household ID
+// add themselves to its members. To require proof of knowing the invite code,
+// replace the client-side joinHousehold flow with a callable Cloud Function:
+//
+//   exports.joinHousehold = functions.https.onCall(async (data, context) => {
+//     const { code } = data;
+//     if (!context.auth) throw new HttpsError('unauthenticated', '');
+//     const snap = await admin.firestore()
+//       .collection('households')
+//       .where('inviteCode','==',code)
+//       .limit(1).get();
+//     if (snap.empty) throw new HttpsError('not-found', 'bad code');
+//     await snap.docs[0].ref.update({
+//       members: admin.firestore.FieldValue.arrayUnion(context.auth.uid)
+//     });
+//     return { id: snap.docs[0].id, name: snap.docs[0].data().name };
+//   });
+//
+// Then in this rules file, remove isSelfJoinUpdate from the update rule:
+//   allow update: if isMemberUpdate();
+// Client direct-writes to `members` are now blocked; only the function can
+// add members (it uses the Admin SDK which bypasses rules).
+// ─────────────────────────────────────────────────────────────────────────────

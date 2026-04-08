@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { initializeApp } from "firebase/app";
-import { getFirestore, collection, addDoc, deleteDoc, updateDoc, doc, getDoc, onSnapshot, query, orderBy, getDocs, where, setDoc, arrayUnion } from "firebase/firestore";
+import { getFirestore, collection, addDoc, deleteDoc, updateDoc, doc, getDoc, onSnapshot, query, orderBy, getDocs, where, setDoc, arrayUnion, limit } from "firebase/firestore";
 import { getAuth, signInAnonymously } from "firebase/auth";
 import { getStorage, ref, uploadBytes, getDownloadURL } from "firebase/storage";
 
@@ -46,6 +46,22 @@ const MODULES = [
   { id: "subscriptions", icon: "📺", label: "מנויים",        desc: "ניהול מנויים ותשלומים חוזרים", color: "#00897B", bg: "#E0F2F1", available: true  },
   { id: "receipts",      icon: "🧾", label: "קבלות",         desc: "ארגון קבלות ותשלומים",     color: "#2980B9", bg: "#EBF5FB", available: false },
 ];
+
+// ─── Invite-code expiry ───────────────────────────────────────────────────────
+const INVITE_EXPIRY_DAYS = 7;
+const expiryFromNow = () =>
+  new Date(Date.now() + INVITE_EXPIRY_DAYS * 24 * 60 * 60 * 1000).toISOString();
+const isInviteExpired = (iso) => {
+  if (!iso) return false; // legacy households without expiry are treated as valid
+  const t = Date.parse(iso);
+  return Number.isNaN(t) || t < Date.now();
+};
+const formatExpiryDate = (iso) => {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear()}`;
+};
 
 // ─── Shared input style ───────────────────────────────────────────────────────
 
@@ -240,15 +256,16 @@ function NameSetup({ onSave }) {
 
 // ─── HouseholdSetup ───────────────────────────────────────────────────────────
 
-function HouseholdSetup({ userName, onDone, onCancel }) {
-  const [mode, setMode]         = useState(null); // "create" | "join"
+function HouseholdSetup({ userName, onDone, onCancel, initialJoinCode }) {
+  const [mode, setMode]         = useState(initialJoinCode ? "join" : null); // "create" | "join"
   const [name, setName]         = useState("");
-  const [joinCode, setJoinCode] = useState("");
+  const [joinCode, setJoinCode] = useState(initialJoinCode || "");
   const [loading, setLoading]   = useState(false);
   const [error, setError]       = useState("");
   const [createdCode, setCreatedCode] = useState(null); // after creation, show code
   const [createdId, setCreatedId]     = useState(null);
   const [createdName, setCreatedName] = useState(null);
+  const autoJoinFired = useRef(false);
 
   const createHousehold = async () => {
     if (!name.trim()) return;
@@ -260,6 +277,7 @@ function HouseholdSetup({ userName, onDone, onCancel }) {
       await setDoc(newRef, {
         name: name.trim(),
         inviteCode,
+        inviteCodeExpiry: expiryFromNow(),
         createdBy: userName,
         createdAt: new Date().toISOString(),
         members: [auth.currentUser.uid],
@@ -280,16 +298,26 @@ function HouseholdSetup({ userName, onDone, onCancel }) {
     onDone(createdId, createdName);
   };
 
-  const joinHousehold = async () => {
-    const code = joinCode.trim().toUpperCase();
+  const joinHousehold = async (explicitCode) => {
+    const code = (explicitCode ?? joinCode).trim().toUpperCase();
     if (code.length !== 6) { setError("הזן קוד בן 6 תווים"); return; }
     setLoading(true); setError("");
     try {
       if (!auth.currentUser) await signInAnonymously(auth);
-      const q = query(collection(db, "households"), where("inviteCode", "==", code));
+      // limit(1) is required: the Firestore rule for `list` enforces
+      // request.query.limit <= 20, and queries without an explicit limit
+      // are rejected.
+      const q = query(collection(db, "households"), where("inviteCode", "==", code), limit(1));
       const snap = await getDocs(q);
       if (snap.empty) { setError("קוד לא נמצא. בדוק שוב."); setLoading(false); return; }
       const hDoc = snap.docs[0];
+      // Reject expired invite codes (client-side check; the doc was just
+      // returned by the list query so we already have the expiry field).
+      if (isInviteExpired(hDoc.data().inviteCodeExpiry)) {
+        setError("הקוד פג תוקף. בקש מבעל הבית קוד חדש.");
+        setLoading(false);
+        return;
+      }
       // Add the current user to the members array (idempotent via arrayUnion).
       // Without this, Firestore rules will reject subsequent reads/writes.
       try {
@@ -304,6 +332,16 @@ function HouseholdSetup({ userName, onDone, onCancel }) {
     } catch (e) { setError("שגיאה בחיבור. נסה שוב."); console.error(e); }
     setLoading(false);
   };
+
+  // ── Deep-link auto-join: if a code arrived via ?join=, fire it once. ──
+  useEffect(() => {
+    if (autoJoinFired.current) return;
+    if (initialJoinCode && initialJoinCode.length === 6) {
+      autoJoinFired.current = true;
+      joinHousehold(initialJoinCode);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialJoinCode]);
 
   const btnBase = { border: "none", borderRadius: 14, padding: "14px", fontSize: 16, fontWeight: 600, fontFamily: "inherit", cursor: "pointer", color: "#fff" };
 
@@ -479,7 +517,7 @@ function HouseholdPickerScreen({ userName, households, onSelect, onAddHousehold,
 
 // ─── HomeScreen ───────────────────────────────────────────────────────────────
 
-function HomeScreen({ userName, householdName, inviteCode, onNavigate, onSwitchHousehold, householdId }) {
+function HomeScreen({ userName, householdName, inviteCode, inviteCodeExpiry, onRotateInvite, onNavigate, onSwitchHousehold, householdId }) {
   const storageKey = `module-order-${householdId}`;
   const [showInvite, setShowInvite] = useState(false);
   const [moduleOrder, setModuleOrder] = useState(() => {
@@ -621,41 +659,62 @@ function HomeScreen({ userName, householdName, inviteCode, onNavigate, onSwitchH
       </div>
 
       {/* Invite modal */}
-      {showInvite && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 100, display: "flex", alignItems: "flex-end", justifyContent: "center" }} onClick={(e) => { if (e.target === e.currentTarget) setShowInvite(false); }}>
-          <div dir="rtl" style={{ background: "#fff", borderRadius: "24px 24px 0 0", padding: 28, width: "100%", maxWidth: 480, animation: "slideUp 0.3s ease" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-              <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: "#2D3436" }}>הזמן לבית</h3>
-              <button onClick={() => setShowInvite(false)} style={{ background: "none", border: "none", fontSize: 22, cursor: "pointer", color: "#999", lineHeight: 1 }}>✕</button>
-            </div>
-            <p style={{ margin: "0 0 20px", fontSize: 14, color: "#888" }}>שתף את קוד ההצטרפות עם בני המשפחה</p>
-            <div style={{ background: "#F5F2EF", borderRadius: 14, padding: "14px 20px", textAlign: "center", marginBottom: 20 }}>
-              <p style={{ margin: "0 0 4px", fontSize: 12, color: "#AAA" }}>קוד הצטרפות</p>
-              <div style={{ fontSize: 32, fontWeight: 700, letterSpacing: 8, color: "#2D3436" }}>{inviteCode}</div>
-            </div>
-            <div style={{ display: "flex", gap: 12 }}>
+      {showInvite && (() => {
+        const expired = isInviteExpired(inviteCodeExpiry);
+        const expiryText = inviteCodeExpiry
+          ? (expired ? "פג תוקף" : `תוקף עד ${formatExpiryDate(inviteCodeExpiry)}`)
+          : "";
+        const joinUrl = `https://grocery-app-livid-nu.vercel.app/?join=${inviteCode}`;
+        const waMsg = `הי! הצטרף/י לבית "${householdName}" באפליקציה שלנו 🏠\nקוד הצטרפות: *${inviteCode}*\nלחיצה אחת להצטרפות:\n${joinUrl}`;
+        const mailSubject = encodeURIComponent(`הזמנה להצטרף לבית "${householdName}"`);
+        const mailBody = encodeURIComponent(`הי!\n\nהוזמנת להצטרף לבית "${householdName}" באפליקציה שלנו.\n\nלחיצה אחת להצטרפות:\n${joinUrl}\n\nאו פתח/י את האפליקציה והזן/י את הקוד: ${inviteCode}`);
+        return (
+          <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 100, display: "flex", alignItems: "flex-end", justifyContent: "center" }} onClick={(e) => { if (e.target === e.currentTarget) setShowInvite(false); }}>
+            <div dir="rtl" style={{ background: "#fff", borderRadius: "24px 24px 0 0", padding: 28, width: "100%", maxWidth: 480, animation: "slideUp 0.3s ease" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: "#2D3436" }}>הזמן לבית</h3>
+                <button onClick={() => setShowInvite(false)} style={{ background: "none", border: "none", fontSize: 22, cursor: "pointer", color: "#999", lineHeight: 1 }}>✕</button>
+              </div>
+              <p style={{ margin: "0 0 20px", fontSize: 14, color: "#888" }}>שתף את קוד ההצטרפות עם בני המשפחה</p>
+              <div style={{ background: expired ? "#FFEBEE" : "#F5F2EF", borderRadius: 14, padding: "14px 20px", textAlign: "center", marginBottom: 12, border: expired ? "1px solid #EF9A9A" : "none" }}>
+                <p style={{ margin: "0 0 4px", fontSize: 12, color: "#AAA" }}>קוד הצטרפות</p>
+                <div style={{ fontSize: 32, fontWeight: 700, letterSpacing: 8, color: expired ? "#C62828" : "#2D3436" }}>{inviteCode}</div>
+                {expiryText && (
+                  <p style={{ margin: "6px 0 0", fontSize: 12, color: expired ? "#C62828" : "#888", fontWeight: expired ? 600 : 400 }}>
+                    {expired ? "⚠️ " : ""}{expiryText}
+                  </p>
+                )}
+              </div>
               <button
-                onClick={() => {
-                  const msg = `הי! הצטרף/י לבית "${householdName}" באפליקציה שלנו 🏠\nקוד הצטרפות: *${inviteCode}*\nhttps://grocery-app-livid-nu.vercel.app/`;
-                  window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, "_blank");
-                }}
-                style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, background: "#25D366", border: "none", borderRadius: 14, padding: "14px", fontSize: 15, fontWeight: 600, color: "#fff", fontFamily: "inherit", cursor: "pointer" }}>
-                <span style={{ fontSize: 20 }}>💬</span> WhatsApp
+                onClick={onRotateInvite}
+                style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, background: "#fff", border: "1px solid #DDD", borderRadius: 12, padding: "10px", fontSize: 14, fontWeight: 600, color: "#555", fontFamily: "inherit", cursor: "pointer", marginBottom: 16 }}>
+                <span style={{ fontSize: 16 }}>🔄</span> רענן קוד (תוקף ל-{INVITE_EXPIRY_DAYS} ימים)
               </button>
-              <button
-                onClick={() => {
-                  const subject = encodeURIComponent(`הזמנה להצטרף לבית "${householdName}"`);
-                  const body = encodeURIComponent(`הי!\n\nהוזמנת להצטרף לבית "${householdName}" באפליקציה שלנו.\n\nקוד הצטרפות: ${inviteCode}\n\nלינק לאפליקציה:\nhttps://grocery-app-livid-nu.vercel.app/\n\nפתח את האפליקציה, בחר "הצטרף לקיים" והזן את הקוד.`);
-                  window.open(`mailto:?subject=${subject}&body=${body}`, "_blank");
-                }}
-                style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, background: "#EA4335", border: "none", borderRadius: 14, padding: "14px", fontSize: 15, fontWeight: 600, color: "#fff", fontFamily: "inherit", cursor: "pointer" }}>
-                <span style={{ fontSize: 20 }}>✉️</span> אימייל
-              </button>
+              <div style={{ display: "flex", gap: 12 }}>
+                <button
+                  disabled={expired}
+                  onClick={() => {
+                    if (expired) return;
+                    window.open(`https://wa.me/?text=${encodeURIComponent(waMsg)}`, "_blank");
+                  }}
+                  style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, background: expired ? "#CCC" : "#25D366", border: "none", borderRadius: 14, padding: "14px", fontSize: 15, fontWeight: 600, color: "#fff", fontFamily: "inherit", cursor: expired ? "not-allowed" : "pointer" }}>
+                  <span style={{ fontSize: 20 }}>💬</span> WhatsApp
+                </button>
+                <button
+                  disabled={expired}
+                  onClick={() => {
+                    if (expired) return;
+                    window.open(`mailto:?subject=${mailSubject}&body=${mailBody}`, "_blank");
+                  }}
+                  style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, background: expired ? "#CCC" : "#EA4335", border: "none", borderRadius: 14, padding: "14px", fontSize: 15, fontWeight: 600, color: "#fff", fontFamily: "inherit", cursor: expired ? "not-allowed" : "pointer" }}>
+                  <span style={{ fontSize: 20 }}>✉️</span> אימייל
+                </button>
+              </div>
+              <div style={{ paddingBottom: 8 }} />
             </div>
-            <div style={{ paddingBottom: 8 }} />
           </div>
-        </div>
-      )}
+        );
+      })()}
     </div>
   );
 }
@@ -2269,10 +2328,36 @@ export default function GroceryApp() {
   const [screen,        setScreen]   = useState("home");
   const [showAddHousehold, setShowAddHousehold] = useState(false);
 
+  // ── Deep-link join: read ?join=CODE from the URL on first render. ──
+  // The code is stripped from the URL immediately so it doesn't linger in
+  // browser history, share screenshots, or get re-applied on reload.
+  // sessionStorage holds it across the auth/name onboarding screens in case
+  // the user reloads mid-onboarding.
+  const [pendingJoinCode, setPendingJoinCode] = useState(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const fromUrl = params.get("join");
+      if (fromUrl) {
+        const url = new URL(window.location.href);
+        url.searchParams.delete("join");
+        window.history.replaceState({}, "", url.toString());
+        const code = fromUrl.trim().toUpperCase();
+        sessionStorage.setItem("grocery-pending-join", code);
+        return code;
+      }
+      return sessionStorage.getItem("grocery-pending-join") || null;
+    } catch { return null; }
+  });
+  const clearPendingJoin = () => {
+    try { sessionStorage.removeItem("grocery-pending-join"); } catch {}
+    setPendingJoinCode(null);
+  };
+
   // ── Active household (session-only — not restored from localStorage) ──
-  const [householdId,   setHouseholdId]   = useState("");
-  const [householdName, setHouseholdName] = useState("");
-  const [inviteCode,    setInviteCode]    = useState("");
+  const [householdId,        setHouseholdId]        = useState("");
+  const [householdName,      setHouseholdName]      = useState("");
+  const [inviteCode,         setInviteCode]         = useState("");
+  const [inviteCodeExpiry,   setInviteCodeExpiry]   = useState("");
 
   // ── Persistent list of all households this user belongs to ──
   const [households, setHouseholds] = useState(() => {
@@ -2306,10 +2391,32 @@ export default function GroceryApp() {
     setHouseholdId(id);
     setHouseholdName(name);
     setShowAddHousehold(false);
+    clearPendingJoin();
     try {
       const snap = await getDoc(doc(db, "households", id));
-      if (snap.exists()) setInviteCode(snap.data().inviteCode || "");
+      if (snap.exists()) {
+        setInviteCode(snap.data().inviteCode || "");
+        setInviteCodeExpiry(snap.data().inviteCodeExpiry || "");
+      }
     } catch (e) { console.error("Failed to load invite code:", e); }
+  };
+
+  // ── Rotate the active household's invite code ──
+  const rotateInvite = async () => {
+    if (!householdId) return;
+    const newCode = generateCode();
+    const newExpiry = expiryFromNow();
+    try {
+      await updateDoc(doc(db, "households", householdId), {
+        inviteCode: newCode,
+        inviteCodeExpiry: newExpiry,
+      });
+      setInviteCode(newCode);
+      setInviteCodeExpiry(newExpiry);
+    } catch (e) {
+      console.error("Failed to rotate invite code:", e);
+      alert("שגיאה ברענון הקוד. נסה שוב.");
+    }
   };
 
   // ── Select an existing household from the picker ──
@@ -2330,7 +2437,10 @@ export default function GroceryApp() {
         }
       }
       const snap = await getDoc(doc(db, "households", id));
-      if (snap.exists()) setInviteCode(snap.data().inviteCode || "");
+      if (snap.exists()) {
+        setInviteCode(snap.data().inviteCode || "");
+        setInviteCodeExpiry(snap.data().inviteCodeExpiry || "");
+      }
     } catch (e) { console.error("Failed to load invite code:", e); }
     setScreen("home");
   };
@@ -2349,6 +2459,7 @@ export default function GroceryApp() {
     setHouseholdId("");
     setHouseholdName("");
     setInviteCode("");
+    setInviteCodeExpiry("");
     setScreen("home");
   };
 
@@ -2366,13 +2477,16 @@ export default function GroceryApp() {
   // Screen 1: Enter name
   if (!userName) return <NameSetup onSave={saveName} />;
 
-  // Screen 2a: No households yet, or explicitly adding a new one
-  if (households.length === 0 || showAddHousehold) {
+  // Screen 2a: No households yet, or explicitly adding a new one,
+  // or arrived via deep link (?join=CODE) — go straight to HouseholdSetup
+  // with the code prefilled so it can auto-join.
+  if (households.length === 0 || showAddHousehold || pendingJoinCode) {
     return (
       <HouseholdSetup
         userName={userName}
         onDone={saveHousehold}
-        onCancel={households.length > 0 ? () => setShowAddHousehold(false) : undefined}
+        onCancel={households.length > 0 && !pendingJoinCode ? () => setShowAddHousehold(false) : undefined}
+        initialJoinCode={pendingJoinCode}
       />
     );
   }
@@ -2401,6 +2515,8 @@ export default function GroceryApp() {
       userName={userName}
       householdName={householdName}
       inviteCode={inviteCode}
+      inviteCodeExpiry={inviteCodeExpiry}
+      onRotateInvite={rotateInvite}
       onNavigate={setScreen}
       onSwitchHousehold={switchHousehold}
       householdId={householdId}
