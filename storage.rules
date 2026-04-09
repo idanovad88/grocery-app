@@ -1,26 +1,40 @@
 rules_version = '2';
 
-// grocery-app Firebase Storage rules
+// ─────────────────────────────────────────────────────────────────────────────
+// grocery-app Firebase Storage rules — household-scoped, membership-enforced
+//
+// Architecture:
+//   • All user-uploaded files live under `households/{hid}/{module}/{file}`
+//     where `hid` matches a Firestore /households/{hid} document.
+//   • Read/write is allowed only to users whose uid is in that household's
+//     members array (looked up live via firestore.get).
+//   • Legacy flat paths (coupons/xxx, insurance/xxx, etc.) are explicitly
+//     denied — if you previously uploaded files to those paths, they are
+//     now unreachable via the app and should be deleted from the Storage
+//     console.
 //
 // Upload paths used by the client (see src/App.jsx):
-//   coupons/{timestamp}_{filename}
-//   insurance/{timestamp}_{filename}
-//   subscriptions/{timestamp}_{filename}   (when the subscriptions module is deployed)
-//
-// Caveat: these paths are NOT namespaced per household, so rules cannot scope
-// access to a specific household. The best we can do today is:
-//   • Require authentication.
-//   • Cap file size.
-//   • Restrict content types to images and PDFs.
-// Proper scoping requires changing the client to upload to
-//   households/{hid}/coupons/{file}  etc.
-// which can be done alongside the Firestore membership upgrade.
+//   households/{hid}/coupons/{timestamp}_{filename}
+//   households/{hid}/insurance/{timestamp}_{filename}
+//   households/{hid}/subscriptions/{timestamp}_{filename}
+//   households/{hid}/personal_docs/{timestamp}_{filename}
+// ─────────────────────────────────────────────────────────────────────────────
 
 service firebase.storage {
   match /b/{bucket}/o {
 
     function signedIn() {
       return request.auth != null;
+    }
+
+    // Cross-service Firestore lookup: reads the household doc and checks
+    // whether the caller's uid is in its members list. This requires the
+    // Firestore `members` field to exist — legacy households that never
+    // self-healed will fail this check, which is the desired behavior.
+    function isMember(hid) {
+      return signedIn() &&
+             request.auth.uid in
+               firestore.get(/databases/(default)/documents/households/$(hid)).data.members;
     }
 
     function okType() {
@@ -33,27 +47,31 @@ service firebase.storage {
       return request.resource.size < 10 * 1024 * 1024;
     }
 
-    match /coupons/{file} {
-      allow read:  if signedIn();
-      allow write: if signedIn() && okType() && okSize();
+    // ── Household-scoped module uploads ────────────────────────────────────
+    match /households/{hid}/coupons/{file} {
+      allow read:  if isMember(hid);
+      allow write: if isMember(hid) && okType() && okSize();
     }
 
-    match /insurance/{file} {
-      allow read:  if signedIn();
-      allow write: if signedIn() && okType() && okSize();
+    match /households/{hid}/insurance/{file} {
+      allow read:  if isMember(hid);
+      allow write: if isMember(hid) && okType() && okSize();
     }
 
-    match /subscriptions/{file} {
-      allow read:  if signedIn();
-      allow write: if signedIn() && okType() && okSize();
+    match /households/{hid}/subscriptions/{file} {
+      allow read:  if isMember(hid);
+      allow write: if isMember(hid) && okType() && okSize();
     }
 
-    match /personal_docs/{file} {
-      allow read:  if signedIn();
-      allow write: if signedIn() && okType() && okSize();
+    match /households/{hid}/personal_docs/{file} {
+      allow read:  if isMember(hid);
+      allow write: if isMember(hid) && okType() && okSize();
     }
 
-    // Deny everything else.
+    // Deny everything else — including legacy flat paths like
+    // /coupons/*, /insurance/*, /subscriptions/*, /personal_docs/*.
+    // Old files remain in the bucket but are no longer readable; delete
+    // them manually via the Firebase Storage console to fully clean up.
     match /{allPaths=**} {
       allow read, write: if false;
     }

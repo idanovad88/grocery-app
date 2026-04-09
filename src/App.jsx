@@ -1046,7 +1046,7 @@ function CouponsScreen({ userName, householdId, onBack }) {
     try {
       let imageUrl = "", imagePath = "";
       if (file) {
-        imagePath = `coupons/${Date.now()}_${file.name}`;
+        imagePath = `households/${householdId}/coupons/${Date.now()}_${file.name}`;
         const storageRef = ref(storage, imagePath);
         await uploadBytes(storageRef, file, { contentType: file.type });
         imageUrl = await getDownloadURL(storageRef);
@@ -1113,7 +1113,7 @@ function CouponsScreen({ userName, householdId, onBack }) {
       let imageUrl  = editingCoupon.imageUrl  || "";
       let imagePath = editingCoupon.imagePath || "";
       if (editFile) {
-        imagePath = `coupons/${Date.now()}_${editFile.name}`;
+        imagePath = `households/${householdId}/coupons/${Date.now()}_${editFile.name}`;
         const storageRef = ref(storage, imagePath);
         await uploadBytes(storageRef, editFile, { contentType: editFile.type });
         imageUrl = await getDownloadURL(storageRef);
@@ -1445,7 +1445,7 @@ function InsuranceScreen({ userName, householdId, onBack }) {
     try {
       let fileUrl = "", filePath = "";
       if (file) {
-        filePath = `insurance/${Date.now()}_${file.name}`;
+        filePath = `households/${householdId}/insurance/${Date.now()}_${file.name}`;
         const sRef = ref(storage, filePath);
         await uploadBytes(sRef, file, { contentType: file.type });
         fileUrl = await getDownloadURL(sRef);
@@ -1492,7 +1492,7 @@ function InsuranceScreen({ userName, householdId, onBack }) {
       let fileUrl  = editingDoc.fileUrl  || "";
       let filePath = editingDoc.filePath || "";
       if (editFile) {
-        filePath = `insurance/${Date.now()}_${editFile.name}`;
+        filePath = `households/${householdId}/insurance/${Date.now()}_${editFile.name}`;
         const sRef = ref(storage, filePath);
         await uploadBytes(sRef, editFile, { contentType: editFile.type });
         fileUrl = await getDownloadURL(sRef);
@@ -1811,7 +1811,7 @@ function PersonalDocsScreen({ userName, householdId, onBack }) {
     try {
       let fileUrl = "", filePath = "";
       if (file) {
-        filePath = `personal_docs/${Date.now()}_${file.name}`;
+        filePath = `households/${householdId}/personal_docs/${Date.now()}_${file.name}`;
         const sRef = ref(storage, filePath);
         await uploadBytes(sRef, file, { contentType: file.type });
         fileUrl = await getDownloadURL(sRef);
@@ -1950,7 +1950,7 @@ function PersonalDocsScreen({ userName, householdId, onBack }) {
       let fileUrl  = editingDoc.fileUrl  || "";
       let filePath = editingDoc.filePath || "";
       if (editFile) {
-        filePath = `personal_docs/${Date.now()}_${editFile.name}`;
+        filePath = `households/${householdId}/personal_docs/${Date.now()}_${editFile.name}`;
         const sRef = ref(storage, filePath);
         await uploadBytes(sRef, editFile, { contentType: editFile.type });
         fileUrl = await getDownloadURL(sRef);
@@ -2523,7 +2523,7 @@ function SubscriptionsScreen({ userName, householdId, onBack }) {
     try {
       let fileUrl = "", filePath = "", fileType = "";
       if (file) {
-        filePath = `subscriptions/${Date.now()}_${file.name}`;
+        filePath = `households/${householdId}/subscriptions/${Date.now()}_${file.name}`;
         const sRef = ref(storage, filePath);
         await uploadBytes(sRef, file, { contentType: file.type });
         fileUrl = await getDownloadURL(sRef);
@@ -2562,7 +2562,7 @@ function SubscriptionsScreen({ userName, householdId, onBack }) {
       let filePath = editingSub.filePath || "";
       let fileType = editingSub.fileType || "";
       if (editFile) {
-        filePath = `subscriptions/${Date.now()}_${editFile.name}`;
+        filePath = `households/${householdId}/subscriptions/${Date.now()}_${editFile.name}`;
         const sRef = ref(storage, filePath);
         await uploadBytes(sRef, editFile, { contentType: editFile.type });
         fileUrl = await getDownloadURL(sRef);
