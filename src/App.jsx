@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { initializeApp } from "firebase/app";
 import { getFirestore, collection, addDoc, deleteDoc, updateDoc, doc, getDoc, onSnapshot, query, orderBy, getDocs, where, setDoc, arrayUnion, limit } from "firebase/firestore";
 import { getAuth, signInAnonymously } from "firebase/auth";
-import { getStorage, ref, uploadBytes, getDownloadURL } from "firebase/storage";
+import { getStorage, ref, uploadBytes, getDownloadURL, getBlob } from "firebase/storage";
 
 const firebaseConfig = {
   apiKey: "AIzaSyBRAaqDl5ywLm-wSOmvo-ucPxtVNdWjH7w",
@@ -1863,16 +1863,31 @@ function PersonalDocsScreen({ userName, householdId, onBack }) {
   const showToast = (msg) => { setShareToast(msg); setTimeout(() => setShareToast(""), 2200); };
 
   // Real file attachment via Web Share API Level 2 (mobile + modern desktop).
-  // Fetches the file from Firebase Storage as a blob, wraps it in a File, and
-  // hands it to the OS share sheet. Apps like Mail/WhatsApp/Drive will then
+  // Downloads the file from Firebase Storage as a Blob, wraps it in a File,
+  // and hands it to the OS share sheet. Apps like Mail/WhatsApp/Drive then
   // receive the actual file as an attachment, not a link.
+  //
+  // Uses Firebase's getBlob() first, which goes through the authenticated
+  // SDK path and has proper CORS headers set by Google. Falls back to raw
+  // fetch() of the signed download URL if getBlob() is unavailable or the
+  // doc has no filePath (legacy records where only fileUrl was saved).
   const shareFile = async (persDoc) => {
     if (!persDoc?.fileUrl) return;
     setShareBusy(true);
     try {
-      const resp = await fetch(persDoc.fileUrl);
-      if (!resp.ok) throw new Error(`fetch ${resp.status}`);
-      const blob = await resp.blob();
+      let blob;
+      if (persDoc.filePath) {
+        try {
+          blob = await getBlob(ref(storage, persDoc.filePath));
+        } catch (e) {
+          console.warn("getBlob failed, falling back to fetch:", e);
+        }
+      }
+      if (!blob) {
+        const resp = await fetch(persDoc.fileUrl);
+        if (!resp.ok) throw new Error(`fetch ${resp.status}`);
+        blob = await resp.blob();
+      }
       const rawName = persDoc.filePath?.split("/").pop()?.replace(/^\d+_/, "") || "document";
       const file = new File([blob], rawName, { type: persDoc.fileType || blob.type || "application/octet-stream" });
       if (navigator.canShare && navigator.canShare({ files: [file] })) {
