@@ -1760,6 +1760,19 @@ function PersonalDocsScreen({ userName, householdId, onBack }) {
   const [editFileError, setEditFileError]     = useState(null);
   const editFileInputRef = useRef(null);
 
+  // Share-menu state: which doc the bottom-sheet is currently open for
+  const [shareMenuDoc, setShareMenuDoc]       = useState(null);
+  const [shareBusy, setShareBusy]             = useState(false);
+  const [shareToast, setShareToast]           = useState("");
+  // Detect Web Share API Level 2 (file sharing) support once on mount
+  const [supportsFileShare, setSupportsFileShare] = useState(false);
+  useEffect(() => {
+    try {
+      const probe = new File(["x"], "probe.txt", { type: "text/plain" });
+      setSupportsFileShare(typeof navigator !== "undefined" && !!navigator.canShare && navigator.canShare({ files: [probe] }));
+    } catch { setSupportsFileShare(false); }
+  }, []);
+
   const MAX_FILE_SIZE = 5 * 1024 * 1024;
 
   useEffect(() => {
@@ -1845,6 +1858,75 @@ function PersonalDocsScreen({ userName, householdId, onBack }) {
   };
 
   const closeEdit = () => { setEditingDoc(null); setEditFile(null); setEditFilePreview(null); setEditFileError(null); };
+
+  // ── Share helpers ─────────────────────────────────────────────────────────
+  const showToast = (msg) => { setShareToast(msg); setTimeout(() => setShareToast(""), 2200); };
+
+  // Real file attachment via Web Share API Level 2 (mobile + modern desktop).
+  // Fetches the file from Firebase Storage as a blob, wraps it in a File, and
+  // hands it to the OS share sheet. Apps like Mail/WhatsApp/Drive will then
+  // receive the actual file as an attachment, not a link.
+  const shareFile = async (persDoc) => {
+    if (!persDoc?.fileUrl) return;
+    setShareBusy(true);
+    try {
+      const resp = await fetch(persDoc.fileUrl);
+      if (!resp.ok) throw new Error(`fetch ${resp.status}`);
+      const blob = await resp.blob();
+      const rawName = persDoc.filePath?.split("/").pop()?.replace(/^\d+_/, "") || "document";
+      const file = new File([blob], rawName, { type: persDoc.fileType || blob.type || "application/octet-stream" });
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({
+          files: [file],
+          title: persDoc.title || "מסמך אישי",
+          text:  persDoc.comment || persDoc.title || "",
+        });
+        setShareMenuDoc(null);
+      } else {
+        showToast("הדפדפן לא תומך בשיתוף קבצים — נסה אימייל / WhatsApp");
+      }
+    } catch (e) {
+      if (e.name !== "AbortError") {
+        console.error("share file error:", e);
+        showToast("שגיאה בשיתוף הקובץ");
+      }
+    }
+    setShareBusy(false);
+  };
+
+  const shareViaEmail = (persDoc) => {
+    if (!persDoc) return;
+    const subject = encodeURIComponent(persDoc.title || "מסמך אישי");
+    const lines = [];
+    if (persDoc.comment) lines.push(persDoc.comment, "");
+    if (persDoc.fileUrl) { lines.push("קישור למסמך:", persDoc.fileUrl); }
+    const body = encodeURIComponent(lines.join("\n"));
+    window.location.href = `mailto:?subject=${subject}&body=${body}`;
+    setShareMenuDoc(null);
+  };
+
+  const shareViaWhatsApp = (persDoc) => {
+    if (!persDoc) return;
+    const lines = [];
+    if (persDoc.title)   lines.push(`*${persDoc.title}*`);
+    if (persDoc.comment) lines.push(persDoc.comment);
+    if (persDoc.fileUrl) lines.push(persDoc.fileUrl);
+    const text = encodeURIComponent(lines.join("\n"));
+    window.open(`https://wa.me/?text=${text}`, "_blank");
+    setShareMenuDoc(null);
+  };
+
+  const copyLink = async (persDoc) => {
+    if (!persDoc?.fileUrl) return;
+    try {
+      await navigator.clipboard.writeText(persDoc.fileUrl);
+      showToast("הקישור הועתק ✓");
+      setShareMenuDoc(null);
+    } catch (e) {
+      console.error("copy error:", e);
+      showToast("שגיאה בהעתקה");
+    }
+  };
 
   const saveEditDoc = async () => {
     if (!editTitle.trim()) return;
@@ -1970,42 +2052,36 @@ function PersonalDocsScreen({ userName, householdId, onBack }) {
                   <div style={{ padding: "14px 16px" }}>
                     <p style={{ margin: 0, fontSize: 16, fontWeight: 600, color: "#2D3436" }}>📄 {persDoc.title}</p>
                     {persDoc.comment && <p style={{ margin: "8px 0 0", fontSize: 13, color: "#555", lineHeight: 1.5 }}>{persDoc.comment}</p>}
-                    <div style={{ display: "flex", gap: 12, marginTop: 8, alignItems: "center" }}>
-                      <span style={{ fontSize: 11, color: "#CCC" }}>🕐 {formatDate(persDoc.date)}</span>
-                      <span style={{ fontSize: 11, color: uc.color, fontWeight: 500 }}>👤 {persDoc.addedBy}</span>
+                    <div style={{ display: "flex", gap: 12, marginTop: 8, alignItems: "center", justifyContent: "space-between" }}>
+                      <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+                        <span style={{ fontSize: 11, color: "#CCC" }}>🕐 {formatDate(persDoc.date)}</span>
+                        <span style={{ fontSize: 11, color: uc.color, fontWeight: 500 }}>👤 {persDoc.addedBy}</span>
+                      </div>
+                      {persDoc.fileUrl && (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setShareMenuDoc(persDoc); }}
+                          aria-label="שלח / שתף"
+                          title="שלח / שתף"
+                          style={{
+                            background: PDOC_BG,
+                            border: "none",
+                            borderRadius: "50%",
+                            width: 32,
+                            height: 32,
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            cursor: "pointer",
+                            fontSize: 15,
+                            color: PDOC_PURPLE,
+                            padding: 0,
+                            flexShrink: 0,
+                          }}
+                        >
+                          📤
+                        </button>
+                      )}
                     </div>
-                    {persDoc.fileUrl && (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          const subject = encodeURIComponent(persDoc.title || "מסמך אישי");
-                          const bodyLines = [];
-                          if (persDoc.comment) bodyLines.push(persDoc.comment, "");
-                          bodyLines.push("קישור למסמך:", persDoc.fileUrl);
-                          const body = encodeURIComponent(bodyLines.join("\n"));
-                          window.location.href = `mailto:?subject=${subject}&body=${body}`;
-                        }}
-                        style={{
-                          marginTop: 12,
-                          width: "100%",
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          gap: 8,
-                          background: "#EA4335",
-                          border: "none",
-                          borderRadius: 12,
-                          padding: "10px 14px",
-                          fontSize: 14,
-                          fontWeight: 600,
-                          color: "#fff",
-                          fontFamily: "inherit",
-                          cursor: "pointer",
-                        }}
-                      >
-                        <span style={{ fontSize: 16 }}>✉️</span> שלח במייל
-                      </button>
-                    )}
                   </div>
                 </div>
               </SwipeItem>
@@ -2046,6 +2122,64 @@ function PersonalDocsScreen({ userName, householdId, onBack }) {
               <button onClick={closeEdit} style={{ border: "2px solid #E8E5E0", background: "#fff", color: "#999", borderRadius: 12, padding: "14px 20px", fontSize: 15, fontFamily: "inherit", cursor: "pointer" }}>✕</button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* ── Share Bottom-Sheet ─────────────────────────────────────────────
+          Renders a list of share options for the currently-selected doc.
+          To add more options later (Telegram, SMS, Drive upload, etc.),
+          add a new entry to SHARE_OPTIONS below — no other UI changes needed. */}
+      {shareMenuDoc && (() => {
+        const SHARE_OPTIONS = [
+          ...(supportsFileShare ? [{ id: "file",  icon: "📎", label: "שלח קובץ (מצורף)",       sub: "פותח את חלון השיתוף של המערכת",          color: PDOC_PURPLE, action: () => shareFile(shareMenuDoc), busy: shareBusy }] : []),
+          { id: "email",    icon: "✉️", label: "אימייל",        sub: "פותח את אפליקציית המייל עם קישור למסמך", color: "#EA4335",   action: () => shareViaEmail(shareMenuDoc) },
+          { id: "whatsapp", icon: "💬", label: "WhatsApp",      sub: "שולח קישור למסמך ב-WhatsApp",            color: "#25D366",   action: () => shareViaWhatsApp(shareMenuDoc) },
+          { id: "copy",     icon: "📋", label: "העתק קישור",     sub: "מעתיק את הקישור ללוח",                   color: "#666",      action: () => copyLink(shareMenuDoc) },
+        ];
+        return (
+          <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 110, display: "flex", alignItems: "flex-end", justifyContent: "center" }}
+               onClick={(e) => { if (e.target === e.currentTarget) setShareMenuDoc(null); }}>
+            <div dir="rtl" style={{ background: "#fff", borderRadius: "24px 24px 0 0", padding: 24, width: "100%", maxWidth: 480, animation: "slideUp 0.3s ease" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+                <h3 style={{ margin: 0, fontSize: 17, fontWeight: 600, color: "#2D3436" }}>📤 שיתוף מסמך</h3>
+                <button onClick={() => setShareMenuDoc(null)} style={{ background: "none", border: "none", fontSize: 22, cursor: "pointer", color: "#999", lineHeight: 1 }}>✕</button>
+              </div>
+              <p style={{ margin: "0 0 16px", fontSize: 13, color: "#888", fontWeight: 300 }}>{shareMenuDoc.title}</p>
+
+              <div style={{ display: "flex", flexDirection: "column", gap: 8, paddingBottom: 8 }}>
+                {SHARE_OPTIONS.map((opt) => (
+                  <button key={opt.id}
+                    onClick={opt.action}
+                    disabled={opt.busy}
+                    style={{
+                      display: "flex", alignItems: "center", gap: 14,
+                      background: "#FAFAFA", border: "1.5px solid #F0EDE8", borderRadius: 14,
+                      padding: "14px 16px", cursor: opt.busy ? "wait" : "pointer", fontFamily: "inherit", textAlign: "right",
+                      opacity: opt.busy ? 0.6 : 1,
+                    }}>
+                    <div style={{ width: 40, height: 40, borderRadius: 12, background: opt.color, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, color: "#fff", flexShrink: 0 }}>{opt.icon}</div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <p style={{ margin: 0, fontSize: 15, fontWeight: 600, color: "#2D3436" }}>{opt.label}{opt.busy ? " ..." : ""}</p>
+                      <p style={{ margin: "2px 0 0", fontSize: 12, color: "#888", fontWeight: 300 }}>{opt.sub}</p>
+                    </div>
+                  </button>
+                ))}
+              </div>
+
+              {!supportsFileShare && (
+                <p style={{ margin: "8px 0 0", fontSize: 11, color: "#BBB", fontWeight: 300, textAlign: "center" }}>
+                  הדפדפן שלך לא תומך בשיתוף קבצים מצורפים — האפשרויות לעיל ישלחו קישור בלבד.
+                </p>
+              )}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Share-action toast (clipboard / errors) */}
+      {shareToast && (
+        <div style={{ position: "fixed", bottom: 104, left: "50%", transform: "translateX(-50%)", background: "#2D3436", color: "#fff", borderRadius: 14, padding: "10px 18px", fontSize: 14, zIndex: 120, boxShadow: "0 6px 24px rgba(0,0,0,0.3)", whiteSpace: "nowrap", animation: "slideUp 0.25s ease" }}>
+          {shareToast}
         </div>
       )}
 
