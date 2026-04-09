@@ -747,7 +747,11 @@ function ShoppingScreen({ userName, householdId, onBack }) {
 
   useEffect(() => {
     const q = query(collection(db, "households", householdId, "items"), orderBy("date", "desc"));
-    const unsub = onSnapshot(q, (snap) => { setItems(snap.docs.map((d) => ({ id: d.id, ...d.data() }))); setLoading(false); });
+    const unsub = onSnapshot(
+      q,
+      (snap) => { setItems(snap.docs.map((d) => ({ id: d.id, ...d.data() }))); setLoading(false); },
+      (err) => { console.error("items listener error:", err); setLoading(false); }
+    );
     return () => unsub();
   }, [householdId]);
 
@@ -1012,7 +1016,11 @@ function CouponsScreen({ userName, householdId, onBack }) {
 
   useEffect(() => {
     const q = query(collection(db, "households", householdId, "coupons"), orderBy("date", "desc"));
-    const unsub = onSnapshot(q, (snap) => { setCoupons(snap.docs.map((d) => ({ id: d.id, ...d.data() }))); setLoading(false); });
+    const unsub = onSnapshot(
+      q,
+      (snap) => { setCoupons(snap.docs.map((d) => ({ id: d.id, ...d.data() }))); setLoading(false); },
+      (err) => { console.error("coupons listener error:", err); setLoading(false); }
+    );
     return () => unsub();
   }, [householdId]);
 
@@ -1403,7 +1411,11 @@ function InsuranceScreen({ userName, householdId, onBack }) {
 
   useEffect(() => {
     const q = query(collection(db, "households", householdId, "insurance"), orderBy("date", "desc"));
-    const unsub = onSnapshot(q, (snap) => { setDocs(snap.docs.map((d) => ({ id: d.id, ...d.data() }))); setLoading(false); });
+    const unsub = onSnapshot(
+      q,
+      (snap) => { setDocs(snap.docs.map((d) => ({ id: d.id, ...d.data() }))); setLoading(false); },
+      (err) => { console.error("insurance listener error:", err); setLoading(false); }
+    );
     return () => unsub();
   }, [householdId]);
 
@@ -1752,7 +1764,11 @@ function PersonalDocsScreen({ userName, householdId, onBack }) {
 
   useEffect(() => {
     const q = query(collection(db, "households", householdId, "personal_docs"), orderBy("date", "desc"));
-    const unsub = onSnapshot(q, (snap) => { setDocs(snap.docs.map((d) => ({ id: d.id, ...d.data() }))); setLoading(false); });
+    const unsub = onSnapshot(
+      q,
+      (snap) => { setDocs(snap.docs.map((d) => ({ id: d.id, ...d.data() }))); setLoading(false); },
+      (err) => { console.error("personal_docs listener error:", err); setLoading(false); }
+    );
     return () => unsub();
   }, [householdId]);
 
@@ -1958,6 +1974,38 @@ function PersonalDocsScreen({ userName, householdId, onBack }) {
                       <span style={{ fontSize: 11, color: "#CCC" }}>🕐 {formatDate(persDoc.date)}</span>
                       <span style={{ fontSize: 11, color: uc.color, fontWeight: 500 }}>👤 {persDoc.addedBy}</span>
                     </div>
+                    {persDoc.fileUrl && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          const subject = encodeURIComponent(persDoc.title || "מסמך אישי");
+                          const bodyLines = [];
+                          if (persDoc.comment) bodyLines.push(persDoc.comment, "");
+                          bodyLines.push("קישור למסמך:", persDoc.fileUrl);
+                          const body = encodeURIComponent(bodyLines.join("\n"));
+                          window.location.href = `mailto:?subject=${subject}&body=${body}`;
+                        }}
+                        style={{
+                          marginTop: 12,
+                          width: "100%",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          gap: 8,
+                          background: "#EA4335",
+                          border: "none",
+                          borderRadius: 12,
+                          padding: "10px 14px",
+                          fontSize: 14,
+                          fontWeight: 600,
+                          color: "#fff",
+                          fontFamily: "inherit",
+                          cursor: "pointer",
+                        }}
+                      >
+                        <span style={{ fontSize: 16 }}>✉️</span> שלח במייל
+                      </button>
+                    )}
                   </div>
                 </div>
               </SwipeItem>
@@ -2075,7 +2123,11 @@ function BirthdaysScreen({ userName, householdId, onBack }) {
 
   useEffect(() => {
     const q = query(collection(db, "households", householdId, "birthdays"), orderBy("date", "asc"));
-    const unsub = onSnapshot(q, (snap) => { setBirthdays(snap.docs.map(d => ({ id: d.id, ...d.data() }))); setLoading(false); });
+    const unsub = onSnapshot(
+      q,
+      (snap) => { setBirthdays(snap.docs.map(d => ({ id: d.id, ...d.data() }))); setLoading(false); },
+      (err) => { console.error("birthdays listener error:", err); setLoading(false); }
+    );
     return () => unsub();
   }, [householdId]);
 
@@ -2288,7 +2340,11 @@ function SubscriptionsScreen({ userName, householdId, onBack }) {
 
   useEffect(() => {
     const q = query(collection(db, "households", householdId, "subscriptions"), orderBy("renewalDate", "asc"));
-    const unsub = onSnapshot(q, (snap) => { setSubs(snap.docs.map(d => ({ id: d.id, ...d.data() }))); setLoading(false); });
+    const unsub = onSnapshot(
+      q,
+      (snap) => { setSubs(snap.docs.map(d => ({ id: d.id, ...d.data() }))); setLoading(false); },
+      (err) => { console.error("subscriptions listener error:", err); setLoading(false); }
+    );
     return () => unsub();
   }, [householdId]);
 
