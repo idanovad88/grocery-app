@@ -1,0 +1,61 @@
+rules_version = '2';
+
+// grocery-app Firebase Storage rules
+//
+// Upload paths used by the client (see src/App.jsx):
+//   coupons/{timestamp}_{filename}
+//   insurance/{timestamp}_{filename}
+//   subscriptions/{timestamp}_{filename}   (when the subscriptions module is deployed)
+//
+// Caveat: these paths are NOT namespaced per household, so rules cannot scope
+// access to a specific household. The best we can do today is:
+//   • Require authentication.
+//   • Cap file size.
+//   • Restrict content types to images and PDFs.
+// Proper scoping requires changing the client to upload to
+//   households/{hid}/coupons/{file}  etc.
+// which can be done alongside the Firestore membership upgrade.
+
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function okType() {
+      return request.resource.contentType.matches('image/.*')
+          || request.resource.contentType == 'application/pdf';
+    }
+
+    function okSize() {
+      // 10 MB cap per file
+      return request.resource.size < 10 * 1024 * 1024;
+    }
+
+    match /coupons/{file} {
+      allow read:  if signedIn();
+      allow write: if signedIn() && okType() && okSize();
+    }
+
+    match /insurance/{file} {
+      allow read:  if signedIn();
+      allow write: if signedIn() && okType() && okSize();
+    }
+
+    match /subscriptions/{file} {
+      allow read:  if signedIn();
+      allow write: if signedIn() && okType() && okSize();
+    }
+
+    match /personal_docs/{file} {
+      allow read:  if signedIn();
+      allow write: if signedIn() && okType() && okSize();
+    }
+
+    // Deny everything else.
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

@@ -44,6 +44,7 @@ const MODULES = [
   { id: "insurance", icon: "🛡️", label: "מסמכי ביטוח",  desc: "ניהול פוליסות וביטוחים",   color: "#1565C0", bg: "#E3F2FD", available: true  },
   { id: "birthdays",     icon: "🎈", label: "ימי הולדת",     desc: "מעקב ימי הולדת משפחה",     color: "#E91E63", bg: "#FCE4EC", available: true  },
   { id: "subscriptions", icon: "📺", label: "מנויים",        desc: "ניהול מנויים ותשלומים חוזרים", color: "#00897B", bg: "#E0F2F1", available: true  },
+  { id: "personal_docs", icon: "📄", label: "מסמכים אישיים", desc: "תעודות, רישיונות, מסמכים סרוקים", color: "#5E35B1", bg: "#EDE7F6", available: true  },
   { id: "receipts",      icon: "🧾", label: "קבלות",         desc: "ארגון קבלות ותשלומים",     color: "#2980B9", bg: "#EBF5FB", available: false },
 ];
 
@@ -1715,6 +1716,322 @@ function InsuranceScreen({ userName, householdId, onBack }) {
   );
 }
 
+// ─── PersonalDocsScreen ──────────────────────────────────────────────────────
+
+const PDOC_PURPLE = "#5E35B1";
+const PDOC_DARK   = "#4527A0";
+const PDOC_BG     = "#EDE7F6";
+const PDOC_SHADOW = "rgba(94,53,177,0.4)";
+
+function PersonalDocsScreen({ userName, householdId, onBack }) {
+  const [docs, setDocs]                       = useState([]);
+  const [loading, setLoading]                 = useState(true);
+  const [showAdd, setShowAdd]                 = useState(false);
+  const [title, setTitle]                     = useState("");
+  const [comment, setComment]                 = useState("");
+  const [file, setFile]                       = useState(null);
+  const [filePreview, setFilePreview]         = useState(null);
+  const [uploading, setUploading]             = useState(false);
+  const [fileError, setFileError]             = useState(null);
+  const [pendingDelete, setPendingDelete]     = useState(null);
+  const [showDeleteAll, setShowDeleteAll]     = useState(false);
+  const [deleteAllConfirm, setDeleteAllConfirm] = useState("");
+  const [lightboxSrc, setLightboxSrc]         = useState(null);
+  const fileInputRef = useRef(null);
+
+  const [editingDoc, setEditingDoc]           = useState(null);
+  const [editTitle, setEditTitle]             = useState("");
+  const [editComment, setEditComment]         = useState("");
+  const [editFile, setEditFile]               = useState(null);
+  const [editFilePreview, setEditFilePreview] = useState(null);
+  const [editUploading, setEditUploading]     = useState(false);
+  const [editFileError, setEditFileError]     = useState(null);
+  const editFileInputRef = useRef(null);
+
+  const MAX_FILE_SIZE = 5 * 1024 * 1024;
+
+  useEffect(() => {
+    const q = query(collection(db, "households", householdId, "personal_docs"), orderBy("date", "desc"));
+    const unsub = onSnapshot(q, (snap) => { setDocs(snap.docs.map((d) => ({ id: d.id, ...d.data() }))); setLoading(false); });
+    return () => unsub();
+  }, [householdId]);
+
+  const handleFileChange = (e) => {
+    const f = e.target.files[0];
+    if (!f) return;
+    if (f.size > MAX_FILE_SIZE) { setFileError(`הקובץ גדול מדי (${(f.size/1024/1024).toFixed(1)}MB) — מקסימום 5MB`); e.target.value = ""; return; }
+    setFileError(null); setFile(f);
+    if (f.type.startsWith("image/")) { const r = new FileReader(); r.onload = (ev) => setFilePreview(ev.target.result); r.readAsDataURL(f); }
+    else setFilePreview("pdf");
+  };
+
+  const handleEditFileChange = (e) => {
+    const f = e.target.files[0];
+    if (!f) return;
+    if (f.size > MAX_FILE_SIZE) { setEditFileError(`הקובץ גדול מדי (${(f.size/1024/1024).toFixed(1)}MB) — מקסימום 5MB`); e.target.value = ""; return; }
+    setEditFileError(null); setEditFile(f);
+    if (f.type.startsWith("image/")) { const r = new FileReader(); r.onload = (ev) => setEditFilePreview(ev.target.result); r.readAsDataURL(f); }
+    else setEditFilePreview("pdf");
+  };
+
+  const resetForm = () => { setTitle(""); setComment(""); setFile(null); setFilePreview(null); setFileError(null); setShowAdd(false); };
+
+  const saveDoc = async () => {
+    if (!title.trim()) return;
+    setUploading(true);
+    try {
+      let fileUrl = "", filePath = "";
+      if (file) {
+        filePath = `personal_docs/${Date.now()}_${file.name}`;
+        const sRef = ref(storage, filePath);
+        await uploadBytes(sRef, file, { contentType: file.type });
+        fileUrl = await getDownloadURL(sRef);
+      }
+      await addDoc(collection(db, "households", householdId, "personal_docs"), {
+        title: title.trim(),
+        comment: comment.trim(),
+        fileUrl,
+        filePath,
+        fileType: file ? file.type : "",
+        addedBy: userName,
+        date: new Date().toISOString(),
+      });
+      resetForm();
+    } catch (e) { console.error("Error saving personal doc:", e); }
+    setUploading(false);
+  };
+
+  const removePersDoc = (id, docData) => {
+    const timerId = setTimeout(async () => {
+      try { await deleteDoc(doc(db, "households", householdId, "personal_docs", id)); } catch (e) { console.error(e); }
+      setPendingDelete(null);
+    }, 4500);
+    setPendingDelete({ id, persDoc: docData, timerId });
+  };
+
+  const undoDelete = () => { if (pendingDelete) { clearTimeout(pendingDelete.timerId); setPendingDelete(null); } };
+
+  const deleteAllDocs = async () => {
+    try {
+      const snap = await getDocs(collection(db, "households", householdId, "personal_docs"));
+      await Promise.all(snap.docs.map(d => deleteDoc(doc(db, "households", householdId, "personal_docs", d.id))));
+    } catch (e) { console.error("Error deleting all personal docs:", e); }
+    setShowDeleteAll(false);
+    setDeleteAllConfirm("");
+  };
+
+  const openEdit = (d) => {
+    setEditingDoc(d);
+    setEditTitle(d.title || "");
+    setEditComment(d.comment || "");
+    setEditFile(null);
+    setEditFilePreview(d.fileUrl ? (d.fileType === "application/pdf" ? "pdf" : d.fileUrl) : null);
+  };
+
+  const closeEdit = () => { setEditingDoc(null); setEditFile(null); setEditFilePreview(null); setEditFileError(null); };
+
+  const saveEditDoc = async () => {
+    if (!editTitle.trim()) return;
+    setEditUploading(true);
+    try {
+      let fileUrl  = editingDoc.fileUrl  || "";
+      let filePath = editingDoc.filePath || "";
+      if (editFile) {
+        filePath = `personal_docs/${Date.now()}_${editFile.name}`;
+        const sRef = ref(storage, filePath);
+        await uploadBytes(sRef, editFile, { contentType: editFile.type });
+        fileUrl = await getDownloadURL(sRef);
+      }
+      await updateDoc(doc(db, "households", householdId, "personal_docs", editingDoc.id), {
+        title: editTitle.trim(),
+        comment: editComment.trim(),
+        fileUrl,
+        filePath,
+        fileType: editFile ? editFile.type : (editingDoc.fileType || ""),
+      });
+      closeEdit();
+    } catch (e) { console.error("Error updating personal doc:", e); }
+    setEditUploading(false);
+  };
+
+  const sorted = docs.filter((d) => d.id !== pendingDelete?.id);
+
+  const FileAttachArea = ({ preview, isPdf, onClear, onPick, inputRef, onChange, error, existingName }) => (
+    <div style={{ marginTop: 10 }}>
+      <input ref={inputRef} type="file" accept="image/*,application/pdf" onChange={onChange} style={{ display: "none" }} />
+      {preview ? (
+        <div style={{ position: "relative" }}>
+          {isPdf || preview === "pdf"
+            ? <div style={{ background: PDOC_BG, borderRadius: 12, padding: 16, textAlign: "center", color: PDOC_PURPLE, fontSize: 14 }}>📄 {existingName || "קובץ מצורף"}</div>
+            : <img src={preview} alt="preview" style={{ width: "100%", borderRadius: 12, maxHeight: 160, objectFit: "cover" }} />
+          }
+          <button onClick={onClear} style={{ position: "absolute", top: 8, left: 8, background: "rgba(0,0,0,0.5)", color: "#fff", border: "none", borderRadius: "50%", width: 28, height: 28, cursor: "pointer", fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
+        </div>
+      ) : (
+        <button onClick={onPick}
+          style={{ width: "100%", border: `2px dashed ${error ? "#E53935" : "#E8E5E0"}`, background: error ? "#FFF5F5" : "#FAFAFA", borderRadius: 12, padding: 16, cursor: "pointer", fontSize: 14, color: error ? "#E53935" : "#AAA", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+          📎 צרף מסמך — PDF או תמונה
+        </button>
+      )}
+      {error && <p style={{ margin: "6px 0 0", fontSize: 12, color: "#E53935", fontWeight: 500 }}>⚠️ {error}</p>}
+    </div>
+  );
+
+  if (loading) return <Loader />;
+
+  return (
+    <div dir="rtl" style={{ fontFamily: "'Rubik', sans-serif", maxWidth: 480, margin: "0 auto", minHeight: "100vh", background: "linear-gradient(165deg, #FAFAFA 0%, #F0EDE8 100%)", position: "relative" }}>
+      {/* Header */}
+      <div style={{ background: `linear-gradient(135deg, ${PDOC_PURPLE} 0%, ${PDOC_DARK} 100%)`, padding: "28px 24px 20px", borderRadius: "0 0 28px 28px", boxShadow: `0 8px 32px ${PDOC_SHADOW}` }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div>
+            <h1 style={{ margin: 0, fontSize: 26, fontWeight: 700, color: "#fff" }}>📄 מסמכים אישיים</h1>
+            <p style={{ margin: "4px 0 0", fontSize: 13, color: "rgba(255,255,255,0.6)", fontWeight: 300 }}>{docs.length} מסמכים שמורים</p>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            {docs.length > 0 && (
+              <button onClick={() => { setShowDeleteAll(true); setDeleteAllConfirm(""); }} style={{ background: "rgba(255,255,255,0.15)", border: "none", borderRadius: 12, padding: "8px 12px", cursor: "pointer", color: "#fff", fontSize: 18, lineHeight: 1 }}>🗑️</button>
+            )}
+            <BackButton onBack={onBack} light />
+          </div>
+        </div>
+      </div>
+
+      <div style={{ padding: "16px 16px 100px" }}>
+        {/* Add form */}
+        {showAdd && (
+          <div style={{ background: "#fff", borderRadius: 20, padding: 20, marginBottom: 16, boxShadow: "0 4px 20px rgba(0,0,0,0.08)", animation: "slideDown 0.3s ease" }}>
+            <h3 style={{ margin: "0 0 16px", fontSize: 16, fontWeight: 600, color: "#2D3436" }}>מסמך חדש</h3>
+
+            <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="שם המסמך *"
+              style={inputStyle} onFocus={(e) => (e.target.style.borderColor = PDOC_PURPLE)} onBlur={(e) => (e.target.style.borderColor = "#E8E5E0")} />
+
+            <textarea value={comment} onChange={(e) => setComment(e.target.value)} placeholder="הערה (אופציונלי)" rows={2}
+              style={{ ...inputStyle, marginTop: 10, resize: "vertical", lineHeight: 1.5 }}
+              onFocus={(e) => (e.target.style.borderColor = PDOC_PURPLE)} onBlur={(e) => (e.target.style.borderColor = "#E8E5E0")} />
+
+            <FileAttachArea preview={filePreview} isPdf={false} onClear={() => { setFile(null); setFilePreview(null); }} onPick={() => fileInputRef.current.click()} inputRef={fileInputRef} onChange={handleFileChange} error={fileError} existingName={file?.name} />
+
+            <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
+              <button onClick={saveDoc} disabled={!title.trim() || uploading}
+                style={{ flex: 1, border: "none", background: title.trim() && !uploading ? `linear-gradient(135deg, ${PDOC_PURPLE}, ${PDOC_DARK})` : "#ccc", color: "#fff", borderRadius: 12, padding: "14px", fontSize: 15, fontWeight: 600, fontFamily: "inherit", cursor: title.trim() && !uploading ? "pointer" : "default" }}>
+                {uploading ? "מעלה..." : "שמור מסמך ✓"}
+              </button>
+              <button onClick={resetForm} style={{ border: "2px solid #E8E5E0", background: "#fff", color: "#999", borderRadius: 12, padding: "14px 20px", fontSize: 15, fontFamily: "inherit", cursor: "pointer" }}>✕</button>
+            </div>
+          </div>
+        )}
+
+        {sorted.length === 0 && !showAdd && (
+          <div style={{ textAlign: "center", padding: "60px 20px" }}>
+            <div style={{ fontSize: 56, marginBottom: 16 }}>📄</div>
+            <p style={{ fontSize: 18, color: "#999", fontWeight: 300 }}>אין מסמכים אישיים</p>
+            <p style={{ fontSize: 14, color: "#CCC", fontWeight: 300, marginTop: 4 }}>לחצו על + כדי להוסיף מסמך</p>
+          </div>
+        )}
+
+        {sorted.length > 0 && <p style={{ textAlign: "center", fontSize: 12, color: "#BBB", margin: "8px 0 12px", fontWeight: 300 }}>עריכה → | ← מחיקה</p>}
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {sorted.map((persDoc) => {
+            const uc    = getUserColor(persDoc.addedBy);
+            const isPdf = persDoc.fileType === "application/pdf" || persDoc.filePath?.toLowerCase().endsWith(".pdf");
+            return (
+              <SwipeItem key={persDoc.id} borderRadius={18} onSwipeLeft={() => removePersDoc(persDoc.id, persDoc)} onSwipeRight={() => openEdit(persDoc)}>
+                <div style={{ background: "#fff", borderRadius: 18, overflow: "hidden", boxShadow: "0 2px 12px rgba(0,0,0,0.06)", borderRight: `4px solid ${PDOC_PURPLE}` }}>
+                  {persDoc.fileUrl && (
+                    isPdf ? (
+                      <a href={persDoc.fileUrl} target="_blank" rel="noopener noreferrer"
+                        style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, height: 64, background: PDOC_BG, textDecoration: "none" }}>
+                        <span style={{ fontSize: 22 }}>📄</span>
+                        <span style={{ color: PDOC_PURPLE, fontWeight: 600, fontSize: 14 }}>פתח מסמך PDF</span>
+                        <span style={{ fontSize: 12, color: "#B39DDB" }}>↗</span>
+                      </a>
+                    ) : (
+                      <img src={persDoc.fileUrl} alt={persDoc.title} onClick={(e) => { e.stopPropagation(); setLightboxSrc(persDoc.fileUrl); }} style={{ width: "100%", height: 120, objectFit: "cover", cursor: "zoom-in" }} />
+                    )
+                  )}
+                  <div style={{ padding: "14px 16px" }}>
+                    <p style={{ margin: 0, fontSize: 16, fontWeight: 600, color: "#2D3436" }}>📄 {persDoc.title}</p>
+                    {persDoc.comment && <p style={{ margin: "8px 0 0", fontSize: 13, color: "#555", lineHeight: 1.5 }}>{persDoc.comment}</p>}
+                    <div style={{ display: "flex", gap: 12, marginTop: 8, alignItems: "center" }}>
+                      <span style={{ fontSize: 11, color: "#CCC" }}>🕐 {formatDate(persDoc.date)}</span>
+                      <span style={{ fontSize: 11, color: uc.color, fontWeight: 500 }}>👤 {persDoc.addedBy}</span>
+                    </div>
+                  </div>
+                </div>
+              </SwipeItem>
+            );
+          })}
+        </div>
+      </div>
+
+      {!showAdd && <FAB onClick={() => setShowAdd(true)} color={`linear-gradient(135deg, ${PDOC_PURPLE}, ${PDOC_DARK})`} shadow={PDOC_SHADOW} />}
+
+      {/* Undo Delete Toast */}
+      {pendingDelete && (
+        <div style={{ position: "fixed", bottom: 104, left: "50%", transform: "translateX(-50%)", background: "#2D3436", color: "#fff", borderRadius: 14, padding: "12px 18px", display: "flex", alignItems: "center", gap: 14, zIndex: 60, boxShadow: "0 6px 24px rgba(0,0,0,0.3)", whiteSpace: "nowrap", animation: "slideUp 0.25s ease" }}>
+          <span style={{ fontSize: 14 }}>🗑️ "{pendingDelete.persDoc.title}" נמחק</span>
+          <button onClick={undoDelete} style={{ background: PDOC_PURPLE, border: "none", borderRadius: 8, padding: "6px 14px", color: "#fff", fontSize: 13, fontWeight: 600, fontFamily: "inherit", cursor: "pointer" }}>ביטול</button>
+        </div>
+      )}
+
+      {/* Edit Modal */}
+      {editingDoc && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 100, display: "flex", alignItems: "flex-end", justifyContent: "center" }} onClick={(e) => { if (e.target === e.currentTarget) closeEdit(); }}>
+          <div dir="rtl" style={{ background: "#fff", borderRadius: "24px 24px 0 0", padding: 24, width: "100%", maxWidth: 480, maxHeight: "90vh", overflowY: "auto", animation: "slideUp 0.3s ease" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+              <h3 style={{ margin: 0, fontSize: 17, fontWeight: 600, color: "#2D3436" }}>✏️ עריכת מסמך</h3>
+              <button onClick={closeEdit} style={{ background: "none", border: "none", fontSize: 22, cursor: "pointer", color: "#999", lineHeight: 1 }}>✕</button>
+            </div>
+            <input value={editTitle} onChange={(e) => setEditTitle(e.target.value)} placeholder="שם המסמך *"
+              style={inputStyle} onFocus={(e) => (e.target.style.borderColor = PDOC_PURPLE)} onBlur={(e) => (e.target.style.borderColor = "#E8E5E0")} />
+            <textarea value={editComment} onChange={(e) => setEditComment(e.target.value)} placeholder="הערה (אופציונלי)" rows={2}
+              style={{ ...inputStyle, marginTop: 10, resize: "vertical", lineHeight: 1.5 }}
+              onFocus={(e) => (e.target.style.borderColor = PDOC_PURPLE)} onBlur={(e) => (e.target.style.borderColor = "#E8E5E0")} />
+            <FileAttachArea preview={editFilePreview} isPdf={editFilePreview === "pdf"} onClear={() => { setEditFile(null); setEditFilePreview(null); }} onPick={() => editFileInputRef.current.click()} inputRef={editFileInputRef} onChange={handleEditFileChange} error={editFileError} existingName={editFile?.name} />
+            <div style={{ display: "flex", gap: 8, marginTop: 16, paddingBottom: 8 }}>
+              <button onClick={saveEditDoc} disabled={!editTitle.trim() || editUploading}
+                style={{ flex: 1, border: "none", background: editTitle.trim() && !editUploading ? `linear-gradient(135deg, ${PDOC_PURPLE}, ${PDOC_DARK})` : "#ccc", color: "#fff", borderRadius: 12, padding: "14px", fontSize: 15, fontWeight: 600, fontFamily: "inherit", cursor: editTitle.trim() && !editUploading ? "pointer" : "default" }}>
+                {editUploading ? "שומר..." : "שמור שינויים ✓"}
+              </button>
+              <button onClick={closeEdit} style={{ border: "2px solid #E8E5E0", background: "#fff", color: "#999", borderRadius: 12, padding: "14px 20px", fontSize: 15, fontFamily: "inherit", cursor: "pointer" }}>✕</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <ImageLightbox src={lightboxSrc} onClose={() => setLightboxSrc(null)} />
+
+      {/* ── Delete All Confirmation Modal ── */}
+      {showDeleteAll && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 100, display: "flex", alignItems: "flex-end", justifyContent: "center" }} onClick={(e) => { if (e.target === e.currentTarget) { setShowDeleteAll(false); setDeleteAllConfirm(""); } }}>
+          <div dir="rtl" style={{ background: "#fff", borderRadius: "24px 24px 0 0", padding: 24, width: "100%", maxWidth: 480, animation: "slideUp 0.3s ease" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+              <h3 style={{ margin: 0, fontSize: 17, fontWeight: 600, color: "#E53935" }}>🗑️ מחיקת כל המסמכים</h3>
+              <button onClick={() => { setShowDeleteAll(false); setDeleteAllConfirm(""); }} style={{ background: "none", border: "none", fontSize: 22, cursor: "pointer", color: "#999", lineHeight: 1 }}>✕</button>
+            </div>
+            <p style={{ margin: "0 0 16px", fontSize: 14, color: "#666", lineHeight: 1.5 }}>פעולה זו תמחק את כל {docs.length} המסמכים ולא ניתן לשחזר אותם.<br/>כדי לאשר, הקלד <strong>מחק</strong> בתיבה:</p>
+            <input value={deleteAllConfirm} onChange={(e) => setDeleteAllConfirm(e.target.value)} placeholder="מחק" autoFocus
+              style={{ ...inputStyle, marginBottom: 16 }}
+              onFocus={(e) => (e.target.style.borderColor = "#E53935")} onBlur={(e) => (e.target.style.borderColor = "#E8E5E0")} />
+            <div style={{ display: "flex", gap: 8, paddingBottom: 8 }}>
+              <button onClick={deleteAllDocs} disabled={deleteAllConfirm !== "מחק"}
+                style={{ flex: 1, border: "none", background: deleteAllConfirm === "מחק" ? "#E53935" : "#ccc", color: "#fff", borderRadius: 12, padding: "14px", fontSize: 15, fontWeight: 600, fontFamily: "inherit", cursor: deleteAllConfirm === "מחק" ? "pointer" : "default" }}>
+                מחק הכל
+              </button>
+              <button onClick={() => { setShowDeleteAll(false); setDeleteAllConfirm(""); }}
+                style={{ border: "2px solid #E8E5E0", background: "#fff", color: "#999", borderRadius: 12, padding: "14px 20px", fontSize: 15, fontFamily: "inherit", cursor: "pointer" }}>ביטול</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <GlobalStyles />
+    </div>
+  );
+}
+
 // ─── BirthdaysScreen ─────────────────────────────────────────────────────────
 
 const BDAY_PINK  = "#E91E63";
@@ -2510,6 +2827,7 @@ export default function GroceryApp() {
   if (screen === "insurance")  return <InsuranceScreen  userName={userName} householdId={householdId} onBack={() => setScreen("home")} />;
   if (screen === "birthdays")      return <BirthdaysScreen      userName={userName} householdId={householdId} onBack={() => setScreen("home")} />;
   if (screen === "subscriptions")  return <SubscriptionsScreen  userName={userName} householdId={householdId} onBack={() => setScreen("home")} />;
+  if (screen === "personal_docs")  return <PersonalDocsScreen   userName={userName} householdId={householdId} onBack={() => setScreen("home")} />;
   return (
     <HomeScreen
       userName={userName}

@@ -133,6 +133,12 @@ service cloud.firestore {
         allow create: if isMember(hid) && isString(request.resource.data.name, 200);
         allow update, delete: if isMember(hid);
       }
+
+      match /personal_docs/{pdid} {
+        allow read:   if isMember(hid);
+        allow create: if isMember(hid) && isString(request.resource.data.title, 200);
+        allow update, delete: if isMember(hid);
+      }
     }
 
     // Deny everything else (legacy root-level collections, etc.)
