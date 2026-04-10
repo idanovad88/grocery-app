@@ -1,7 +1,18 @@
 import { useState, useEffect, useRef } from "react";
 import { initializeApp } from "firebase/app";
 import { getFirestore, collection, addDoc, deleteDoc, updateDoc, doc, getDoc, onSnapshot, query, orderBy, getDocs, where, setDoc, arrayUnion, limit } from "firebase/firestore";
-import { getAuth, signInAnonymously } from "firebase/auth";
+import {
+  getAuth,
+  GoogleAuthProvider,
+  signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
+  signInWithCredential,
+  linkWithPopup,
+  linkWithRedirect,
+  signOut,
+  onAuthStateChanged,
+} from "firebase/auth";
 import { getStorage, ref, uploadBytes, getDownloadURL, getBlob } from "firebase/storage";
 
 const firebaseConfig = {
@@ -230,6 +241,62 @@ function SwipeItem({ children, onSwipeLeft, onSwipeRight, borderRadius = 16 }) {
   );
 }
 
+// ─── LoginScreen ──────────────────────────────────────────────────────────────
+// Google Sign-In gateway. Replaces the previous anonymous-auth flow so that
+// the same human keeps the same Firebase UID across devices, which fixes the
+// duplicate-member pill on the home screen and lets household membership
+// follow users to new browsers/phones automatically.
+
+function LoginScreen({ onSignIn, loading, error }) {
+  return (
+    <div dir="rtl" style={{ fontFamily: "'Rubik', sans-serif", maxWidth: 480, margin: "0 auto", minHeight: "100vh", background: "linear-gradient(165deg, #FAFAFA 0%, #F0EDE8 100%)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 24 }}>
+      <div style={{ fontSize: 72, marginBottom: 20 }}>🏠</div>
+      <h1 style={{ fontSize: 26, fontWeight: 700, color: "#2D3436", marginBottom: 8 }}>ברוך הבא</h1>
+      <p style={{ fontSize: 15, color: "#888", marginBottom: 36, fontWeight: 300, textAlign: "center", maxWidth: 320 }}>
+        התחבר כדי לשמור את המשקי בית שלך ולגשת אליהם מכל מכשיר
+      </p>
+      <button
+        onClick={onSignIn}
+        disabled={loading}
+        style={{
+          width: "100%",
+          maxWidth: 300,
+          border: "1px solid #DADCE0",
+          background: loading ? "#F5F5F5" : "#fff",
+          color: "#3C4043",
+          borderRadius: 14,
+          padding: "14px 16px",
+          fontSize: 15,
+          fontWeight: 600,
+          fontFamily: "inherit",
+          cursor: loading ? "default" : "pointer",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: 12,
+          boxShadow: "0 2px 8px rgba(0,0,0,0.04)",
+        }}
+      >
+        <svg width="20" height="20" viewBox="0 0 48 48" aria-hidden="true">
+          <path fill="#4285F4" d="M45.12 24.5c0-1.56-.14-3.06-.4-4.5H24v8.51h11.84c-.51 2.75-2.06 5.08-4.39 6.64v5.52h7.11c4.16-3.83 6.56-9.47 6.56-16.17z"/>
+          <path fill="#34A853" d="M24 46c5.94 0 10.92-1.97 14.56-5.33l-7.11-5.52c-1.97 1.32-4.49 2.1-7.45 2.1-5.73 0-10.58-3.87-12.31-9.07H4.34v5.7C7.96 41.07 15.4 46 24 46z"/>
+          <path fill="#FBBC05" d="M11.69 28.18c-.44-1.32-.69-2.73-.69-4.18s.25-2.86.69-4.18v-5.7H4.34C2.85 17.09 2 20.45 2 24s.85 6.91 2.34 9.88l7.35-5.7z"/>
+          <path fill="#EA4335" d="M24 10.75c3.23 0 6.13 1.11 8.41 3.29l6.31-6.31C34.91 4.18 29.93 2 24 2 15.4 2 7.96 6.93 4.34 14.12l7.35 5.7c1.73-5.2 6.58-9.07 12.31-9.07z"/>
+        </svg>
+        {loading ? "מתחבר..." : "התחבר עם Google"}
+      </button>
+      {error && (
+        <p style={{ color: "#E53935", fontSize: 13, marginTop: 16, maxWidth: 300, textAlign: "center" }}>
+          {error}
+        </p>
+      )}
+      <p style={{ fontSize: 11, color: "#BBB", marginTop: 32, textAlign: "center", maxWidth: 300, fontWeight: 300 }}>
+        אנחנו לא משתפים את המידע שלך. החשבון משמש רק לזיהוי בין המכשירים שלך.
+      </p>
+    </div>
+  );
+}
+
 // ─── NameSetup ────────────────────────────────────────────────────────────────
 
 function NameSetup({ onSave }) {
@@ -435,7 +502,7 @@ function HouseholdSetup({ userName, onDone, onCancel, initialJoinCode }) {
 
 // ─── HouseholdPickerScreen ────────────────────────────────────────────────────
 
-function HouseholdPickerScreen({ userName, households, onSelect, onAddHousehold, onDelete }) {
+function HouseholdPickerScreen({ userName, households, onSelect, onAddHousehold, onDelete, onSignOut }) {
   const HOUSE_COLORS = [
     { bg: "#E3F2FD", icon: "#1565C0" },
     { bg: "#F3E5F5", icon: "#6A1B9A" },
@@ -459,7 +526,27 @@ function HouseholdPickerScreen({ userName, households, onSelect, onAddHousehold,
   return (
     <div dir="rtl" style={{ fontFamily: "'Rubik', sans-serif", maxWidth: 480, margin: "0 auto", minHeight: "100vh", background: "linear-gradient(165deg, #FAFAFA 0%, #F0EDE8 100%)" }}>
       {/* Header */}
-      <div style={{ background: "linear-gradient(135deg, #2D3436 0%, #636E72 100%)", padding: "48px 24px 32px", borderRadius: "0 0 32px 32px", boxShadow: "0 8px 32px rgba(0,0,0,0.12)", marginBottom: 24 }}>
+      <div style={{ background: "linear-gradient(135deg, #2D3436 0%, #636E72 100%)", padding: "48px 24px 32px", borderRadius: "0 0 32px 32px", boxShadow: "0 8px 32px rgba(0,0,0,0.12)", marginBottom: 24, position: "relative" }}>
+        {onSignOut && (
+          <button
+            onClick={onSignOut}
+            style={{
+              position: "absolute",
+              top: 16,
+              left: 16,
+              background: "rgba(255,255,255,0.12)",
+              border: "none",
+              borderRadius: 10,
+              padding: "6px 12px",
+              fontSize: 12,
+              color: "rgba(255,255,255,0.75)",
+              fontFamily: "inherit",
+              cursor: "pointer",
+            }}
+          >
+            התנתק ⏻
+          </button>
+        )}
         <p style={{ margin: "0 0 6px", fontSize: 14, color: "rgba(255,255,255,0.55)", fontWeight: 300 }}>👋 שלום, {userName}</p>
         <h1 style={{ margin: 0, fontSize: 28, fontWeight: 700, color: "#fff" }}>הבתים שלי</h1>
         <p style={{ margin: "8px 0 0", fontSize: 14, color: "rgba(255,255,255,0.6)", fontWeight: 300 }}>בחר משק בית להיכנס אליו</p>
@@ -2896,6 +2983,9 @@ async function migrateExistingData(householdId) {
 export default function GroceryApp() {
   const [userName,      setUserName]  = useState(() => localStorage.getItem("grocery-username") || "");
   const [authReady,     setAuthReady] = useState(false);
+  const [authUser,      setAuthUser]  = useState(null);
+  const [signInLoading, setSignInLoading] = useState(false);
+  const [signInError,   setSignInError]   = useState("");
   const [screen,        setScreen]   = useState("home");
   const [showAddHousehold, setShowAddHousehold] = useState(false);
 
@@ -3038,14 +3128,157 @@ export default function GroceryApp() {
     setScreen("home");
   };
 
+  // ── Auth state listener ──
+  // Only non-anonymous users are considered "signed in" for the app's
+  // purposes. When a Google user arrives (on first login, on a new device,
+  // or after clearing storage), we pull their household membership directly
+  // from Firestore via an array-contains query on `members`, which makes
+  // cross-device access automatic — no manual re-join needed.
   useEffect(() => {
-    // Safety timeout — if auth hangs for any reason, let the app load anyway
+    // Safety timeout — if onAuthStateChanged never fires, unblock the UI
     const timeout = setTimeout(() => setAuthReady(true), 5000);
-    auth.authStateReady()
-      .then(() => { if (!auth.currentUser) return signInAnonymously(auth); })
-      .then(() => { clearTimeout(timeout); setAuthReady(true); })
-      .catch((e) => { console.error("Auth error:", e); clearTimeout(timeout); setAuthReady(true); });
+    const unsub = onAuthStateChanged(auth, async (user) => {
+      clearTimeout(timeout);
+      if (user && !user.isAnonymous) {
+        setAuthUser(user);
+        // Pre-fill userName from Google profile if we don't have one yet.
+        // User can always overwrite via NameSetup fallback.
+        if (user.displayName && !localStorage.getItem("grocery-username")) {
+          localStorage.setItem("grocery-username", user.displayName);
+          setUserName(user.displayName);
+        }
+        // Pull household membership from Firestore (cross-device sync).
+        // Merges with any localStorage entries so we don't lose households
+        // the user just created in this session before the query runs.
+        try {
+          const q = query(
+            collection(db, "households"),
+            where("members", "array-contains", user.uid),
+            limit(20)
+          );
+          const snap = await getDocs(q);
+          const fromFirestore = snap.docs.map(d => ({ id: d.id, name: d.data().name }));
+          setHouseholds(prev => {
+            const merged = [...fromFirestore];
+            for (const h of prev) {
+              if (!merged.find(m => m.id === h.id)) merged.push(h);
+            }
+            localStorage.setItem("grocery-households", JSON.stringify(merged));
+            return merged;
+          });
+        } catch (e) {
+          console.error("Failed to load households from Firestore:", e);
+        }
+      } else {
+        // Signed out, or still holding a legacy anonymous session — treat
+        // as unauthenticated so the LoginScreen gate appears.
+        setAuthUser(null);
+      }
+      setAuthReady(true);
+    });
+    // Mobile fallback path: if we started a redirect sign-in earlier, this
+    // resolves with the result on return. onAuthStateChanged above will also
+    // fire, so we only need this to surface errors from the redirect.
+    getRedirectResult(auth).catch((e) => {
+      if (e?.code) {
+        console.error("Redirect sign-in error:", e);
+        setSignInError("שגיאה בהתחברות. נסה שוב.");
+      }
+    });
+    return () => { clearTimeout(timeout); unsub(); };
   }, []);
+
+  // ── Google sign-in handler ──
+  // 1. If there is a lingering anonymous session, try linkWithPopup first.
+  //    On success the anonymous UID is preserved and upgraded to a Google
+  //    account, so any households the user already created in this browser
+  //    stay attached to them.
+  // 2. If the Google account is already linked to a different Firebase user
+  //    (auth/credential-already-in-use), sign in with the returned credential
+  //    instead — the anonymous UID is abandoned, and the Firestore
+  //    array-contains query picks up the user's existing households from
+  //    their other devices.
+  // 3. If popup is blocked or unsupported (iOS Safari, some PWAs), fall back
+  //    to a redirect flow.
+  const handleSignIn = async () => {
+    setSignInLoading(true);
+    setSignInError("");
+    const provider = new GoogleAuthProvider();
+    try {
+      if (auth.currentUser && auth.currentUser.isAnonymous) {
+        try {
+          await linkWithPopup(auth.currentUser, provider);
+        } catch (e) {
+          if (e?.code === "auth/credential-already-in-use") {
+            const credential = GoogleAuthProvider.credentialFromError(e);
+            if (credential) {
+              await signInWithCredential(auth, credential);
+            } else {
+              throw e;
+            }
+          } else {
+            throw e;
+          }
+        }
+      } else {
+        await signInWithPopup(auth, provider);
+      }
+    } catch (e) {
+      if (
+        e?.code === "auth/popup-blocked" ||
+        e?.code === "auth/popup-closed-by-user" ||
+        e?.code === "auth/cancelled-popup-request" ||
+        e?.code === "auth/operation-not-supported-in-this-environment"
+      ) {
+        if (e.code === "auth/popup-closed-by-user" || e.code === "auth/cancelled-popup-request") {
+          // User cancelled — silent, just reset the spinner
+        } else {
+          // Popup unavailable — switch to redirect
+          try {
+            if (auth.currentUser && auth.currentUser.isAnonymous) {
+              await linkWithRedirect(auth.currentUser, provider);
+            } else {
+              await signInWithRedirect(auth, provider);
+            }
+            return; // page navigates away
+          } catch (re) {
+            console.error("Redirect sign-in error:", re);
+            setSignInError("שגיאה בהתחברות. נסה שוב.");
+          }
+        }
+      } else {
+        console.error("Sign in error:", e);
+        setSignInError("שגיאה בהתחברות. נסה שוב.");
+      }
+    } finally {
+      setSignInLoading(false);
+    }
+  };
+
+  // ── Sign out handler ──
+  // Clears both Firebase auth and the client-side household cache so the
+  // next user on the same device starts from a clean LoginScreen.
+  const handleSignOut = async () => {
+    try {
+      await signOut(auth);
+    } catch (e) {
+      console.error("Sign out error:", e);
+    }
+    setAuthUser(null);
+    setUserName("");
+    setHouseholds([]);
+    setHouseholdId("");
+    setHouseholdName("");
+    setInviteCode("");
+    setInviteCodeExpiry("");
+    setMemberNames({});
+    try {
+      localStorage.removeItem("grocery-username");
+      localStorage.removeItem("grocery-households");
+      localStorage.removeItem("grocery-householdId");
+      localStorage.removeItem("grocery-householdName");
+    } catch {}
+  };
 
   // ── Live listener on the active household doc ──
   // Keeps inviteCode, inviteCodeExpiry and memberNames in sync across
@@ -3069,7 +3302,15 @@ export default function GroceryApp() {
 
   if (!authReady) return <Loader />;
 
-  // Screen 1: Enter name
+  // Screen 0: Not signed in → Google login gate. Everything downstream
+  // assumes a real (non-anonymous) user so sign-in is mandatory.
+  if (!authUser) {
+    return <LoginScreen onSignIn={handleSignIn} loading={signInLoading} error={signInError} />;
+  }
+
+  // Screen 1: Enter name — only reached if Google account has no displayName.
+  // For most users this is skipped automatically by the auto-fill in the
+  // auth effect.
   if (!userName) return <NameSetup onSave={saveName} />;
 
   // Screen 2a: No households yet, or explicitly adding a new one,
@@ -3095,6 +3336,7 @@ export default function GroceryApp() {
         onSelect={selectHousehold}
         onAddHousehold={() => setShowAddHousehold(true)}
         onDelete={deleteHousehold}
+        onSignOut={handleSignOut}
       />
     );
   }
