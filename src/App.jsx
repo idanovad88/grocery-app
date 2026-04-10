@@ -56,6 +56,7 @@ const MODULES = [
   { id: "birthdays",     icon: "🎈", label: "ימי הולדת",     desc: "מעקב ימי הולדת משפחה",     color: "#E91E63", bg: "#FCE4EC", available: true  },
   { id: "subscriptions", icon: "📺", label: "מנויים",        desc: "ניהול מנויים ותשלומים חוזרים", color: "#00897B", bg: "#E0F2F1", available: true  },
   { id: "personal_docs", icon: "📄", label: "מסמכים אישיים", desc: "תעודות, רישיונות, מסמכים סרוקים", color: "#5E35B1", bg: "#EDE7F6", available: true  },
+  { id: "service_providers", icon: "🛠️", label: "אנשי מקצוע", desc: "רשימת טלפונים — חשמלאי, אינסטלטור ועוד", color: "#EF6C00", bg: "#FFF3E0", available: true  },
   { id: "receipts",      icon: "🧾", label: "קבלות",         desc: "ארגון קבלות ותשלומים",     color: "#2980B9", bg: "#EBF5FB", available: false },
 ];
 
@@ -2569,6 +2570,250 @@ function BirthdaysScreen({ userName, householdId, onBack }) {
   );
 }
 
+// ─── ServiceProvidersScreen ──────────────────────────────────────────────────
+
+const SP_ORANGE = "#EF6C00";
+const SP_DARK   = "#E65100";
+
+// Strip everything except digits and a single leading + so tel:/wa.me links work.
+function normalizePhone(raw) {
+  if (!raw) return "";
+  const trimmed = String(raw).trim();
+  const hasPlus = trimmed.startsWith("+");
+  const digits  = trimmed.replace(/\D/g, "");
+  return hasPlus ? `+${digits}` : digits;
+}
+
+// For wa.me we need digits only; assume Israeli local numbers starting with 0
+// map to +972. Otherwise keep the digits (caller already included country code).
+function toWhatsAppDigits(raw) {
+  const n = normalizePhone(raw);
+  if (!n) return "";
+  if (n.startsWith("+")) return n.slice(1);
+  if (n.startsWith("00")) return n.slice(2);
+  if (n.startsWith("0"))  return `972${n.slice(1)}`;
+  return n;
+}
+
+function ServiceProvidersScreen({ userName, householdId, onBack }) {
+  const [providers, setProviders] = useState([]);
+  const [loading, setLoading]     = useState(true);
+  const [showAdd, setShowAdd]     = useState(false);
+  const [name, setName]                 = useState("");
+  const [profession, setProfession]     = useState("");
+  const [phone, setPhone]               = useState("");
+  const [notes, setNotes]               = useState("");
+  const [pendingDelete, setPendingDelete] = useState(null);
+  const [editing, setEditing]             = useState(null);
+  const [editName, setEditName]           = useState("");
+  const [editProfession, setEditProfession] = useState("");
+  const [editPhone, setEditPhone]           = useState("");
+  const [editNotes, setEditNotes]           = useState("");
+
+  useEffect(() => {
+    const q = query(
+      collection(db, "households", householdId, "service_providers"),
+      orderBy("name", "asc")
+    );
+    const unsub = onSnapshot(
+      q,
+      (snap) => { setProviders(snap.docs.map(d => ({ id: d.id, ...d.data() }))); setLoading(false); },
+      (err) => { console.error("service_providers listener error:", err); setLoading(false); }
+    );
+    return () => unsub();
+  }, [householdId]);
+
+  const addProvider = async () => {
+    if (!name.trim() || !phone.trim()) return;
+    try {
+      await addDoc(collection(db, "households", householdId, "service_providers"), {
+        name:       name.trim(),
+        profession: profession.trim(),
+        phone:      normalizePhone(phone),
+        notes:      notes.trim(),
+        addedBy:    userName,
+        createdAt:  new Date().toISOString(),
+      });
+    } catch (e) { console.error(e); }
+    setName(""); setProfession(""); setPhone(""); setNotes(""); setShowAdd(false);
+  };
+
+  const removeProvider = (id, data) => {
+    if (pendingDelete) clearTimeout(pendingDelete.timerId);
+    const timerId = setTimeout(async () => {
+      try { await deleteDoc(doc(db, "households", householdId, "service_providers", id)); }
+      catch (e) { console.error(e); }
+      setPendingDelete(null);
+    }, 4500);
+    setPendingDelete({ id, provider: data, timerId });
+  };
+
+  const undoDelete = () => { if (pendingDelete) { clearTimeout(pendingDelete.timerId); setPendingDelete(null); } };
+
+  const openEdit = (p) => {
+    setEditing(p);
+    setEditName(p.name || "");
+    setEditProfession(p.profession || "");
+    setEditPhone(p.phone || "");
+    setEditNotes(p.notes || "");
+  };
+  const closeEdit = () => setEditing(null);
+  const updateProvider = async () => {
+    if (!editName.trim() || !editPhone.trim()) return;
+    try {
+      await updateDoc(doc(db, "households", householdId, "service_providers", editing.id), {
+        name:       editName.trim(),
+        profession: editProfession.trim(),
+        phone:      normalizePhone(editPhone),
+        notes:      editNotes.trim(),
+      });
+      closeEdit();
+    } catch (e) { console.error(e); }
+  };
+
+  const visible = providers.filter(p => p.id !== pendingDelete?.id);
+
+  if (loading) return <Loader />;
+
+  return (
+    <div dir="rtl" style={{ fontFamily: "'Rubik', sans-serif", maxWidth: 480, margin: "0 auto", minHeight: "100vh", background: "linear-gradient(165deg, #FAFAFA 0%, #F0EDE8 100%)" }}>
+      {/* Header */}
+      <div style={{ background: `linear-gradient(135deg, ${SP_ORANGE} 0%, ${SP_DARK} 100%)`, padding: "28px 24px 20px", borderRadius: "0 0 28px 28px", boxShadow: "0 8px 32px rgba(239,108,0,0.25)" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div>
+            <h1 style={{ margin: 0, fontSize: 26, fontWeight: 700, color: "#fff" }}>🛠️ אנשי מקצוע</h1>
+            <p style={{ margin: "4px 0 0", fontSize: 13, color: "rgba(255,255,255,0.6)", fontWeight: 300 }}>{providers.length} אנשי קשר שמורים</p>
+          </div>
+          <BackButton onBack={onBack} light />
+        </div>
+      </div>
+
+      <div style={{ padding: "16px 16px 100px" }}>
+        {/* Add form */}
+        {showAdd && (
+          <div style={{ background: "#fff", borderRadius: 20, padding: 20, marginBottom: 16, boxShadow: "0 4px 20px rgba(0,0,0,0.08)", animation: "slideDown 0.3s ease" }}>
+            <h3 style={{ margin: "0 0 16px", fontSize: 16, fontWeight: 600, color: "#2D3436" }}>איש מקצוע חדש</h3>
+            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="שם *" autoFocus
+              style={inputStyle} onFocus={(e) => (e.target.style.borderColor = SP_ORANGE)} onBlur={(e) => (e.target.style.borderColor = "#E8E5E0")} />
+            <div style={{ marginTop: 10 }}>
+              <input value={profession} onChange={(e) => setProfession(e.target.value)} placeholder="מקצוע (חשמלאי, אינסטלטור...)"
+                style={inputStyle} onFocus={(e) => (e.target.style.borderColor = SP_ORANGE)} onBlur={(e) => (e.target.style.borderColor = "#E8E5E0")} />
+            </div>
+            <div style={{ marginTop: 10 }}>
+              <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="טלפון *" type="tel" inputMode="tel" dir="ltr"
+                style={{ ...inputStyle, textAlign: "right" }} onFocus={(e) => (e.target.style.borderColor = SP_ORANGE)} onBlur={(e) => (e.target.style.borderColor = "#E8E5E0")} />
+            </div>
+            <div style={{ marginTop: 10 }}>
+              <input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="הערות (אופציונלי)"
+                style={inputStyle} onFocus={(e) => (e.target.style.borderColor = SP_ORANGE)} onBlur={(e) => (e.target.style.borderColor = "#E8E5E0")} />
+            </div>
+            <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
+              <button onClick={addProvider} disabled={!name.trim() || !phone.trim()}
+                style={{ flex: 1, border: "none", background: name.trim() && phone.trim() ? `linear-gradient(135deg, ${SP_ORANGE}, ${SP_DARK})` : "#ccc", color: "#fff", borderRadius: 12, padding: "14px", fontSize: 15, fontWeight: 600, fontFamily: "inherit", cursor: name.trim() && phone.trim() ? "pointer" : "default" }}>
+                שמור ✓
+              </button>
+              <button onClick={() => { setShowAdd(false); setName(""); setProfession(""); setPhone(""); setNotes(""); }}
+                style={{ border: "2px solid #E8E5E0", background: "#fff", color: "#999", borderRadius: 12, padding: "14px 20px", fontSize: 15, fontFamily: "inherit", cursor: "pointer" }}>✕</button>
+            </div>
+          </div>
+        )}
+
+        {visible.length === 0 && !showAdd && (
+          <div style={{ textAlign: "center", padding: "60px 20px" }}>
+            <div style={{ fontSize: 56, marginBottom: 16 }}>🛠️</div>
+            <p style={{ fontSize: 18, color: "#999", fontWeight: 300 }}>אין אנשי קשר שמורים</p>
+            <p style={{ fontSize: 14, color: "#CCC", fontWeight: 300, marginTop: 4 }}>לחצו על + כדי להוסיף</p>
+          </div>
+        )}
+
+        {visible.length > 0 && <p style={{ textAlign: "center", fontSize: 12, color: "#BBB", margin: "8px 0 12px", fontWeight: 300 }}>עריכה → | ← מחיקה</p>}
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {visible.map((p) => {
+            const telHref = p.phone ? `tel:${normalizePhone(p.phone)}` : null;
+            const waHref  = p.phone ? `https://wa.me/${toWhatsAppDigits(p.phone)}` : null;
+            return (
+              <SwipeItem key={p.id} borderRadius={18} onSwipeLeft={() => removeProvider(p.id, p)} onSwipeRight={() => openEdit(p)}>
+                <div style={{ background: "#fff", borderRadius: 18, padding: "16px 18px", boxShadow: "0 2px 12px rgba(0,0,0,0.06)" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+                    <div style={{ width: 48, height: 48, borderRadius: 14, background: "#FFF3E0", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 24, flexShrink: 0 }}>
+                      🛠️
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 16, fontWeight: 600, color: "#2D3436", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</div>
+                      {p.profession && <div style={{ fontSize: 13, color: SP_ORANGE, marginTop: 2, fontWeight: 500 }}>{p.profession}</div>}
+                      {p.phone && <div dir="ltr" style={{ fontSize: 13, color: "#888", marginTop: 2, textAlign: "right" }}>{p.phone}</div>}
+                      {p.notes && <div style={{ fontSize: 12, color: "#AAA", marginTop: 4 }}>{p.notes}</div>}
+                    </div>
+                  </div>
+                  {p.phone && (
+                    <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
+                      <a href={telHref}
+                        style={{ flex: 1, textDecoration: "none", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, background: `linear-gradient(135deg, ${SP_ORANGE}, ${SP_DARK})`, color: "#fff", borderRadius: 12, padding: "12px", fontSize: 14, fontWeight: 600, boxShadow: "0 4px 14px rgba(239,108,0,0.3)" }}>
+                        📞 התקשר
+                      </a>
+                      <a href={waHref} target="_blank" rel="noopener noreferrer"
+                        style={{ flex: 1, textDecoration: "none", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, background: "#25D366", color: "#fff", borderRadius: 12, padding: "12px", fontSize: 14, fontWeight: 600, boxShadow: "0 4px 14px rgba(37,211,102,0.3)" }}>
+                        💬 WhatsApp
+                      </a>
+                    </div>
+                  )}
+                </div>
+              </SwipeItem>
+            );
+          })}
+        </div>
+      </div>
+
+      {!showAdd && <FAB onClick={() => setShowAdd(true)} color={`linear-gradient(135deg, ${SP_ORANGE}, ${SP_DARK})`} shadow="rgba(239,108,0,0.4)" />}
+
+      {/* Undo Delete Toast */}
+      {pendingDelete && (
+        <div style={{ position: "fixed", bottom: 104, left: "50%", transform: "translateX(-50%)", background: "#2D3436", color: "#fff", borderRadius: 14, padding: "12px 18px", display: "flex", alignItems: "center", gap: 14, zIndex: 60, boxShadow: "0 6px 24px rgba(0,0,0,0.3)", whiteSpace: "nowrap", animation: "slideUp 0.25s ease" }}>
+          <span style={{ fontSize: 14 }}>🗑️ "{pendingDelete.provider.name}" נמחק</span>
+          <button onClick={undoDelete} style={{ background: SP_ORANGE, border: "none", borderRadius: 8, padding: "6px 14px", color: "#fff", fontSize: 13, fontWeight: 600, fontFamily: "inherit", cursor: "pointer" }}>ביטול</button>
+        </div>
+      )}
+
+      {/* Edit Modal */}
+      {editing && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 100, display: "flex", alignItems: "flex-end", justifyContent: "center" }} onClick={(e) => { if (e.target === e.currentTarget) closeEdit(); }}>
+          <div dir="rtl" style={{ background: "#fff", borderRadius: "24px 24px 0 0", padding: 24, width: "100%", maxWidth: 480, animation: "slideUp 0.3s ease" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+              <h3 style={{ margin: 0, fontSize: 17, fontWeight: 600, color: "#2D3436" }}>✏️ עריכה</h3>
+              <button onClick={closeEdit} style={{ background: "none", border: "none", fontSize: 22, cursor: "pointer", color: "#999", lineHeight: 1 }}>✕</button>
+            </div>
+            <input value={editName} onChange={(e) => setEditName(e.target.value)} placeholder="שם *" autoFocus
+              style={inputStyle} onFocus={(e) => (e.target.style.borderColor = SP_ORANGE)} onBlur={(e) => (e.target.style.borderColor = "#E8E5E0")} />
+            <div style={{ marginTop: 10 }}>
+              <input value={editProfession} onChange={(e) => setEditProfession(e.target.value)} placeholder="מקצוע"
+                style={inputStyle} onFocus={(e) => (e.target.style.borderColor = SP_ORANGE)} onBlur={(e) => (e.target.style.borderColor = "#E8E5E0")} />
+            </div>
+            <div style={{ marginTop: 10 }}>
+              <input value={editPhone} onChange={(e) => setEditPhone(e.target.value)} placeholder="טלפון *" type="tel" inputMode="tel" dir="ltr"
+                style={{ ...inputStyle, textAlign: "right" }} onFocus={(e) => (e.target.style.borderColor = SP_ORANGE)} onBlur={(e) => (e.target.style.borderColor = "#E8E5E0")} />
+            </div>
+            <div style={{ marginTop: 10 }}>
+              <input value={editNotes} onChange={(e) => setEditNotes(e.target.value)} placeholder="הערות"
+                style={inputStyle} onFocus={(e) => (e.target.style.borderColor = SP_ORANGE)} onBlur={(e) => (e.target.style.borderColor = "#E8E5E0")} />
+            </div>
+            <div style={{ display: "flex", gap: 8, marginTop: 16, paddingBottom: 8 }}>
+              <button onClick={updateProvider} disabled={!editName.trim() || !editPhone.trim()}
+                style={{ flex: 1, border: "none", background: editName.trim() && editPhone.trim() ? `linear-gradient(135deg, ${SP_ORANGE}, ${SP_DARK})` : "#ccc", color: "#fff", borderRadius: 12, padding: "14px", fontSize: 15, fontWeight: 600, fontFamily: "inherit", cursor: editName.trim() && editPhone.trim() ? "pointer" : "default" }}>
+                שמור שינויים ✓
+              </button>
+              <button onClick={closeEdit}
+                style={{ border: "2px solid #E8E5E0", background: "#fff", color: "#999", borderRadius: 12, padding: "14px 20px", fontSize: 15, fontFamily: "inherit", cursor: "pointer" }}>✕</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <GlobalStyles />
+    </div>
+  );
+}
+
 // ─── SubscriptionsScreen ─────────────────────────────────────────────────────
 
 const SUB_GREEN  = "#00897B";
@@ -3346,6 +3591,7 @@ export default function GroceryApp() {
   if (screen === "birthdays")      return <BirthdaysScreen      userName={userName} householdId={householdId} onBack={() => setScreen("home")} />;
   if (screen === "subscriptions")  return <SubscriptionsScreen  userName={userName} householdId={householdId} onBack={() => setScreen("home")} />;
   if (screen === "personal_docs")  return <PersonalDocsScreen   userName={userName} householdId={householdId} onBack={() => setScreen("home")} />;
+  if (screen === "service_providers") return <ServiceProvidersScreen userName={userName} householdId={householdId} onBack={() => setScreen("home")} />;
   return (
     <HomeScreen
       userName={userName}
