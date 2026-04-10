@@ -3141,12 +3141,9 @@ export default function GroceryApp() {
       clearTimeout(timeout);
       if (user && !user.isAnonymous) {
         setAuthUser(user);
-        // Pre-fill userName from Google profile if we don't have one yet.
-        // User can always overwrite via NameSetup fallback.
-        if (user.displayName && !localStorage.getItem("grocery-username")) {
-          localStorage.setItem("grocery-username", user.displayName);
-          setUserName(user.displayName);
-        }
+        // Deliberately do NOT auto-fill userName from Google displayName —
+        // users pick their own nickname via NameSetup on first sign-in,
+        // which is what shows up in memberNames and all "added by" labels.
         // Pull household membership from Firestore (cross-device sync).
         // Merges with any localStorage entries so we don't lose households
         // the user just created in this session before the query runs.
@@ -3308,9 +3305,10 @@ export default function GroceryApp() {
     return <LoginScreen onSignIn={handleSignIn} loading={signInLoading} error={signInError} />;
   }
 
-  // Screen 1: Enter name — only reached if Google account has no displayName.
-  // For most users this is skipped automatically by the auto-fill in the
-  // auth effect.
+  // Screen 1: Pick a nickname. Shown once per Google account (until the
+  // user clears their storage) — deliberately independent of the Google
+  // displayName so users can go by a short family nickname rather than
+  // their full Google profile name.
   if (!userName) return <NameSetup onSave={saveName} />;
 
   // Screen 2a: No households yet, or explicitly adding a new one,
