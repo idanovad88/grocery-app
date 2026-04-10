@@ -1,7 +1,7 @@
 {
-"name": "רשימת קניות",
-"short_name": "קניות",
-"description": "אפליקציה לניהול רשימת קניות משותפת",
+"name": "Homio",
+"short_name": "Homio",
+"description": "ניהול הבית המשפחתי במקום אחד",
 "start_url": "/?v=4",
 "scope": "/",
 "display": "standalone",
