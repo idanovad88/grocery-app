@@ -48,12 +48,14 @@ service cloud.firestore {
       return signedIn() && request.auth.uid in householdMembers(hid);
     }
 
-    // "Self-join" check for /households/{hid} updates: the only change is
-    // to the members array, and the caller's uid ends up in the new list.
-    // Used to let a new user add themselves without already being a member.
+    // "Self-join" check for /households/{hid} updates: the only changes are
+    // to the members array and/or the memberNames map, and the caller's uid
+    // ends up in the new members list. Used to let a new user add themselves
+    // without already being a member — they also write their display name
+    // into memberNames[uid] at the same time so other members see who joined.
     function isSelfJoinUpdate() {
       return signedIn()
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['members'])
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['members', 'memberNames'])
           && request.auth.uid in request.resource.data.members;
     }
 
@@ -85,7 +87,7 @@ service cloud.firestore {
       // create: caller must be in members, and only one member (themselves).
       allow create: if signedIn()
                     && request.resource.data.keys().hasOnly(
-                         ['name','inviteCode','inviteCodeExpiry','createdBy','createdAt','members']
+                         ['name','inviteCode','inviteCodeExpiry','createdBy','createdAt','members','memberNames']
                        )
                     && isString(request.resource.data.name, 60)
                     && isString(request.resource.data.inviteCode, 10)

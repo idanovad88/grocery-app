@@ -282,6 +282,7 @@ function HouseholdSetup({ userName, onDone, onCancel, initialJoinCode }) {
         createdBy: userName,
         createdAt: new Date().toISOString(),
         members: [auth.currentUser.uid],
+        memberNames: { [auth.currentUser.uid]: userName },
       });
       setCreatedCode(inviteCode);
       setCreatedId(newRef.id);
@@ -322,7 +323,10 @@ function HouseholdSetup({ userName, onDone, onCancel, initialJoinCode }) {
       // Add the current user to the members array (idempotent via arrayUnion).
       // Without this, Firestore rules will reject subsequent reads/writes.
       try {
-        await updateDoc(hDoc.ref, { members: arrayUnion(auth.currentUser.uid) });
+        await updateDoc(hDoc.ref, {
+          members: arrayUnion(auth.currentUser.uid),
+          [`memberNames.${auth.currentUser.uid}`]: userName,
+        });
       } catch (e) {
         console.error("Failed to add member:", e);
         setError("שגיאה בהצטרפות. נסה שוב.");
@@ -518,7 +522,7 @@ function HouseholdPickerScreen({ userName, households, onSelect, onAddHousehold,
 
 // ─── HomeScreen ───────────────────────────────────────────────────────────────
 
-function HomeScreen({ userName, householdName, inviteCode, inviteCodeExpiry, onRotateInvite, onNavigate, onSwitchHousehold, householdId }) {
+function HomeScreen({ userName, householdName, inviteCode, inviteCodeExpiry, onRotateInvite, onNavigate, onSwitchHousehold, householdId, memberNames, currentUid }) {
   const storageKey = `module-order-${householdId}`;
   const [showInvite, setShowInvite] = useState(false);
   const [moduleOrder, setModuleOrder] = useState(() => {
@@ -594,6 +598,51 @@ function HomeScreen({ userName, householdName, inviteCode, inviteCodeExpiry, onR
             {householdName && (
               <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 8 }}>
                 <span style={{ fontSize: 13, color: "rgba(255,255,255,0.75)", fontWeight: 400 }}>🏠 {householdName}</span>
+              </div>
+            )}
+            {memberNames && Object.keys(memberNames).length > 0 && (
+              <div style={{ marginTop: 10, display: "flex", flexWrap: "wrap", gap: 6, maxWidth: 260 }}>
+                {Object.entries(memberNames).map(([uid, name]) => {
+                  const c = getUserColor(name);
+                  const isMe = uid === currentUid;
+                  return (
+                    <div
+                      key={uid}
+                      title={isMe ? `${name} (את/ה)` : name}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 6,
+                        background: c.bg,
+                        color: c.color,
+                        borderRadius: 999,
+                        padding: "3px 10px 3px 4px",
+                        fontSize: 12,
+                        fontWeight: 600,
+                        border: isMe ? `1px solid ${c.color}` : "1px solid transparent",
+                      }}
+                    >
+                      <div
+                        style={{
+                          width: 20,
+                          height: 20,
+                          borderRadius: "50%",
+                          background: c.color,
+                          color: "#fff",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          fontSize: 11,
+                          fontWeight: 700,
+                          flexShrink: 0,
+                        }}
+                      >
+                        {(name || "?").charAt(0)}
+                      </div>
+                      <span style={{ whiteSpace: "nowrap" }}>{name}{isMe ? " (את/ה)" : ""}</span>
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>
@@ -2880,6 +2929,7 @@ export default function GroceryApp() {
   const [householdName,      setHouseholdName]      = useState("");
   const [inviteCode,         setInviteCode]         = useState("");
   const [inviteCodeExpiry,   setInviteCodeExpiry]   = useState("");
+  const [memberNames,        setMemberNames]        = useState({});
 
   // ── Persistent list of all households this user belongs to ──
   const [households, setHouseholds] = useState(() => {
@@ -2953,7 +3003,10 @@ export default function GroceryApp() {
       // reads for households that were created before members tracking.
       if (auth.currentUser) {
         try {
-          await updateDoc(doc(db, "households", id), { members: arrayUnion(auth.currentUser.uid) });
+          await updateDoc(doc(db, "households", id), {
+            members: arrayUnion(auth.currentUser.uid),
+            [`memberNames.${auth.currentUser.uid}`]: userName,
+          });
         } catch (e) {
           console.error("Failed to ensure membership:", e);
         }
@@ -2993,6 +3046,26 @@ export default function GroceryApp() {
       .then(() => { clearTimeout(timeout); setAuthReady(true); })
       .catch((e) => { console.error("Auth error:", e); clearTimeout(timeout); setAuthReady(true); });
   }, []);
+
+  // ── Live listener on the active household doc ──
+  // Keeps inviteCode, inviteCodeExpiry and memberNames in sync across
+  // devices so that when a new member joins, their name appears for
+  // everyone else without a manual refresh.
+  useEffect(() => {
+    if (!householdId) { setMemberNames({}); return; }
+    const unsub = onSnapshot(
+      doc(db, "households", householdId),
+      (snap) => {
+        if (!snap.exists()) return;
+        const data = snap.data();
+        setInviteCode(data.inviteCode || "");
+        setInviteCodeExpiry(data.inviteCodeExpiry || "");
+        setMemberNames(data.memberNames || {});
+      },
+      (err) => console.error("household listener error:", err)
+    );
+    return () => unsub();
+  }, [householdId]);
 
   if (!authReady) return <Loader />;
 
@@ -3043,6 +3116,8 @@ export default function GroceryApp() {
       onNavigate={setScreen}
       onSwitchHousehold={switchHousehold}
       householdId={householdId}
+      memberNames={memberNames}
+      currentUid={auth.currentUser?.uid || ""}
     />
   );
 }
