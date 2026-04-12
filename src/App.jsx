@@ -14,6 +14,7 @@ import {
   onAuthStateChanged,
 } from "firebase/auth";
 import { getStorage, ref, uploadBytes, getDownloadURL, getBlob } from "firebase/storage";
+import { getFunctions, httpsCallable } from "firebase/functions";
 
 const firebaseConfig = {
   apiKey: "AIzaSyBRAaqDl5ywLm-wSOmvo-ucPxtVNdWjH7w",
@@ -29,6 +30,7 @@ const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 const auth = getAuth(app);
 const storage = getStorage(app);
+const functions = getFunctions(app);
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -49,12 +51,17 @@ const USER_COLORS = [
   { color: "#E64A19", bg: "#FBE9E7" },
 ];
 
+const BILL_CYAN = "#00ACC1";
+const BILL_DARK = "#006064";
+const BILL_BG   = "#E0F7FA";
+
 const MODULES = [
   { id: "shopping",  icon: "🛒", label: "רשימת קניות",   desc: "ניהול קניות משותף",        color: "#2D3436", bg: "#F0EDED", available: true  },
   { id: "coupons",   icon: "🎟️", label: "שוברים",        desc: "שמירת שוברים והטבות",      color: "#8E44AD", bg: "#F5EEF8", available: true  },
   { id: "insurance", icon: "🛡️", label: "מסמכי ביטוח",  desc: "ניהול פוליסות וביטוחים",   color: "#1565C0", bg: "#E3F2FD", available: true  },
   { id: "birthdays",     icon: "🎈", label: "ימי הולדת",     desc: "מעקב ימי הולדת משפחה",     color: "#E91E63", bg: "#FCE4EC", available: true  },
   { id: "subscriptions", icon: "📺", label: "מנויים",        desc: "ניהול מנויים ותשלומים חוזרים", color: "#00897B", bg: "#E0F2F1", available: true  },
+  { id: "bills",         icon: "💰", label: "חשבונות",       desc: "מעקב חשבונות ותשלומים",        color: "#00ACC1", bg: "#E0F7FA", available: true  },
   { id: "personal_docs", icon: "📄", label: "מסמכים אישיים", desc: "תעודות, רישיונות, מסמכים סרוקים", color: "#5E35B1", bg: "#EDE7F6", available: true  },
   { id: "service_providers", icon: "🛠️", label: "אנשי מקצוע", desc: "רשימת טלפונים — חשמלאי, אינסטלטור ועוד", color: "#EF6C00", bg: "#FFF3E0", available: true  },
   { id: "receipts",      icon: "🧾", label: "קבלות",         desc: "ארגון קבלות ותשלומים",     color: "#2980B9", bg: "#EBF5FB", available: false },
@@ -3156,6 +3163,448 @@ function SubscriptionsScreen({ userName, householdId, onBack }) {
   );
 }
 
+// ─── BillsScreen ─────────────────────────────────────────────────────────────
+
+const BILL_PRESETS = [
+  { name: "חשמל",       icon: "⚡" }, { name: "מים",        icon: "💧" },
+  { name: "גז",         icon: "🔥" }, { name: "ארנונה",     icon: "🏛️" },
+  { name: "אינטרנט",   icon: "🌐" }, { name: "טלפון",      icon: "📞" },
+  { name: "ביטוח רכב", icon: "🚗" }, { name: "ועד בית",    icon: "🏢" },
+];
+
+function getBillUrgency(bill) {
+  if (bill.paid) return { tier: "paid", label: "שולם", color: "#AAA", bg: "#F5F5F5", border: "transparent" };
+  const today = new Date(); today.setHours(0,0,0,0);
+  const due   = new Date(bill.dueDate); due.setHours(0,0,0,0);
+  const days  = Math.round((due - today) / 86400000);
+  if (days < 0)  return { tier: "overdue", label: `פג ${Math.abs(days)} ימים`, color: "#E53935", bg: "#FFEBEE", border: "#E53935" };
+  if (days <= 7) return { tier: "soon",    label: `${days} ימים`,              color: "#E65100", bg: "#FFF3E0", border: "#FF9800" };
+  return { tier: "upcoming", label: `${days} ימים`, color: "#43A047", bg: "#E8F5E9", border: "transparent" };
+}
+
+function BillsScreen({ userName, householdId, onBack }) {
+  const MAX_FILE_SIZE = 5 * 1024 * 1024;
+
+  const [bills, setBills]             = useState([]);
+  const [loading, setLoading]         = useState(true);
+  const [showAdd, setShowAdd]         = useState(false);
+  const [provider, setProvider]       = useState("");
+  const [amount, setAmount]           = useState("");
+  const [dueDate, setDueDate]         = useState("");
+  const [notes, setNotes]             = useState("");
+  const [file, setFile]               = useState(null);
+  const [filePreview, setFilePreview] = useState(null);
+  const [fileError, setFileError]     = useState(null);
+  const [uploading, setUploading]     = useState(false);
+  const fileInputRef                  = useRef(null);
+
+  const [pendingDelete, setPendingDelete]         = useState(null);
+  const [editingBill, setEditingBill]             = useState(null);
+  const [editProvider, setEditProvider]           = useState("");
+  const [editAmount, setEditAmount]               = useState("");
+  const [editDueDate, setEditDueDate]             = useState("");
+  const [editNotes, setEditNotes]                 = useState("");
+  const [editFile, setEditFile]                   = useState(null);
+  const [editFilePreview, setEditFilePreview]     = useState(null);
+  const [editFileError, setEditFileError]         = useState(null);
+  const [editUploading, setEditUploading]         = useState(false);
+  const editFileInputRef                          = useRef(null);
+
+  const [scanning, setScanning]       = useState(false);
+  const [scanError, setScanError]     = useState(null);
+  const [scanResults, setScanResults] = useState(null);
+
+  useEffect(() => {
+    const q = query(collection(db, "households", householdId, "bills"), orderBy("dueDate", "asc"));
+    const unsub = onSnapshot(
+      q,
+      (snap) => { setBills(snap.docs.map(d => ({ id: d.id, ...d.data() }))); setLoading(false); },
+      (err)  => { console.error("bills listener error:", err); setLoading(false); }
+    );
+    return () => unsub();
+  }, [householdId]);
+
+  const handleFileChange = (e) => {
+    const f = e.target.files[0];
+    if (!f) return;
+    if (f.size > MAX_FILE_SIZE) { setFileError("הקובץ גדול מדי — מקסימום 5MB"); e.target.value = ""; return; }
+    setFileError(null); setFile(f);
+    if (f.type.startsWith("image/")) { const r = new FileReader(); r.onload = (ev) => setFilePreview(ev.target.result); r.readAsDataURL(f); }
+    else setFilePreview("pdf");
+  };
+
+  const handleEditFileChange = (e) => {
+    const f = e.target.files[0];
+    if (!f) return;
+    if (f.size > MAX_FILE_SIZE) { setEditFileError("הקובץ גדול מדי — מקסימום 5MB"); e.target.value = ""; return; }
+    setEditFileError(null); setEditFile(f);
+    if (f.type.startsWith("image/")) { const r = new FileReader(); r.onload = (ev) => setEditFilePreview(ev.target.result); r.readAsDataURL(f); }
+    else setEditFilePreview("pdf");
+  };
+
+  const resetForm = () => { setProvider(""); setAmount(""); setDueDate(""); setNotes(""); setFile(null); setFilePreview(null); setFileError(null); setShowAdd(false); };
+
+  const addBill = async () => {
+    if (!provider.trim() || !dueDate) return;
+    setUploading(true);
+    try {
+      let fileUrl = "", filePath = "", fileType = "";
+      if (file) {
+        filePath = `households/${householdId}/bills/${Date.now()}_${file.name}`;
+        const sRef = ref(storage, filePath);
+        await uploadBytes(sRef, file, { contentType: file.type });
+        fileUrl = await getDownloadURL(sRef);
+        fileType = file.type;
+      }
+      await addDoc(collection(db, "households", householdId, "bills"), {
+        provider: provider.trim(), amount: parseFloat(amount) || 0, currency: "ILS",
+        dueDate, paid: false, paidAt: null, notes: notes.trim(),
+        source: "manual", gmailMessageId: null,
+        fileUrl, filePath, fileType, addedBy: userName, createdAt: new Date().toISOString(),
+      });
+      resetForm();
+    } catch (e) { console.error(e); }
+    setUploading(false);
+  };
+
+  const togglePaid = async (bill) => {
+    const newPaid = !bill.paid;
+    try {
+      await updateDoc(doc(db, "households", householdId, "bills", bill.id), {
+        paid: newPaid, paidAt: newPaid ? new Date().toISOString() : null,
+      });
+    } catch (e) { console.error(e); }
+  };
+
+  const removeBill = (id, billData) => {
+    if (pendingDelete) clearTimeout(pendingDelete.timerId);
+    const timerId = setTimeout(async () => {
+      try { await deleteDoc(doc(db, "households", householdId, "bills", id)); } catch (e) { console.error(e); }
+      setPendingDelete(null);
+    }, 4500);
+    setPendingDelete({ id, bill: billData, timerId });
+  };
+
+  const undoDelete = () => { if (pendingDelete) { clearTimeout(pendingDelete.timerId); setPendingDelete(null); } };
+
+  const openEdit = (b) => {
+    setEditingBill(b); setEditProvider(b.provider); setEditAmount(String(b.amount || ""));
+    setEditDueDate(b.dueDate || ""); setEditNotes(b.notes || "");
+    setEditFile(null); setEditFileError(null);
+    setEditFilePreview(b.fileUrl ? (b.fileType?.startsWith("image/") ? b.fileUrl : "pdf") : null);
+  };
+  const closeEdit = () => { setEditingBill(null); setEditFile(null); setEditFilePreview(null); setEditFileError(null); };
+
+  const updateBill = async () => {
+    if (!editProvider.trim() || !editDueDate) return;
+    setEditUploading(true);
+    try {
+      let fileUrl  = editingBill.fileUrl  || "";
+      let filePath = editingBill.filePath || "";
+      let fileType = editingBill.fileType || "";
+      if (editFile) {
+        filePath = `households/${householdId}/bills/${Date.now()}_${editFile.name}`;
+        const sRef = ref(storage, filePath);
+        await uploadBytes(sRef, editFile, { contentType: editFile.type });
+        fileUrl = await getDownloadURL(sRef);
+        fileType = editFile.type;
+      }
+      await updateDoc(doc(db, "households", householdId, "bills", editingBill.id), {
+        provider: editProvider.trim(), amount: parseFloat(editAmount) || 0,
+        dueDate: editDueDate, notes: editNotes.trim(), fileUrl, filePath, fileType,
+      });
+      closeEdit();
+    } catch (e) { console.error(e); }
+    setEditUploading(false);
+  };
+
+  const triggerGmailScan = async () => {
+    setScanning(true); setScanError(null);
+    try {
+      const gmailProvider = new GoogleAuthProvider();
+      gmailProvider.addScope("https://www.googleapis.com/auth/gmail.readonly");
+      const result      = await signInWithPopup(auth, gmailProvider);
+      const accessToken = GoogleAuthProvider.credentialFromResult(result).accessToken;
+      const scanFn      = httpsCallable(functions, "scanGmailBills");
+      const { data }    = await scanFn({ googleAccessToken: accessToken, householdId });
+      const knownIds    = new Set(bills.map(b => b.gmailMessageId).filter(Boolean));
+      setScanResults((data.bills || []).filter(b => !knownIds.has(b.gmailMessageId)));
+    } catch (e) {
+      console.error(e);
+      setScanError("שגיאה בסריקה. נסה שוב.");
+    }
+    setScanning(false);
+  };
+
+  const acceptScanResult = async (extracted) => {
+    try {
+      await addDoc(collection(db, "households", householdId, "bills"), {
+        provider: extracted.provider, amount: extracted.amount || 0, currency: "ILS",
+        dueDate: extracted.dueDate, paid: false, paidAt: null, notes: "",
+        source: "gmail", gmailMessageId: extracted.gmailMessageId,
+        fileUrl: "", filePath: "", fileType: "", addedBy: userName, createdAt: new Date().toISOString(),
+      });
+      setScanResults(prev => prev.filter(r => r.gmailMessageId !== extracted.gmailMessageId));
+    } catch (e) { console.error(e); }
+  };
+
+  const tierOrder = { overdue: 0, soon: 1, upcoming: 2 };
+  const activeBills = bills
+    .filter(b => !b.paid && b.id !== pendingDelete?.id)
+    .sort((a, b) => {
+      const ua = getBillUrgency(a), ub = getBillUrgency(b);
+      const t = (tierOrder[ua.tier] ?? 3) - (tierOrder[ub.tier] ?? 3);
+      return t !== 0 ? t : (a.dueDate || "").localeCompare(b.dueDate || "");
+    });
+  const paidBills = bills
+    .filter(b => b.paid && b.id !== pendingDelete?.id)
+    .sort((a, b) => (b.paidAt || "").localeCompare(a.paidAt || ""));
+
+  const totalUnpaid = activeBills.reduce((s, b) => s + (b.amount || 0), 0);
+
+  const BillFileArea = ({ preview, f, inputRef, onChange, onClear, error }) => (
+    <div style={{ marginTop: 10 }}>
+      <input ref={inputRef} type="file" accept="image/*,application/pdf" onChange={onChange} style={{ display: "none" }} />
+      {preview ? (
+        <div style={{ position: "relative" }}>
+          {preview === "pdf"
+            ? <div style={{ background: BILL_BG, borderRadius: 12, padding: 14, textAlign: "center", color: BILL_CYAN, fontSize: 14 }}>📄 {f?.name || "קובץ מצורף"}</div>
+            : <img src={preview} alt="preview" style={{ width: "100%", borderRadius: 12, maxHeight: 160, objectFit: "cover" }} />
+          }
+          <button onClick={onClear} style={{ position: "absolute", top: 8, left: 8, background: "rgba(0,0,0,0.5)", color: "#fff", border: "none", borderRadius: "50%", width: 28, height: 28, cursor: "pointer", fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
+        </div>
+      ) : (
+        <button onClick={() => inputRef.current.click()}
+          style={{ width: "100%", border: `2px dashed ${error ? "#E53935" : "#E8E5E0"}`, background: error ? "#FFF5F5" : "#FAFAFA", borderRadius: 12, padding: 14, cursor: "pointer", fontSize: 14, color: error ? "#E53935" : "#AAA", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+          📎 צרף חשבון / תמונה (אופציונלי)
+        </button>
+      )}
+      {error && <p style={{ margin: "6px 0 0", fontSize: 12, color: "#E53935", fontWeight: 500 }}>⚠️ {error}</p>}
+    </div>
+  );
+
+  if (loading) return <Loader />;
+
+  return (
+    <div dir="rtl" style={{ fontFamily: "'Rubik', sans-serif", maxWidth: 480, margin: "0 auto", minHeight: "100vh", background: "linear-gradient(165deg, #FAFAFA 0%, #F0EDE8 100%)" }}>
+      {/* Header */}
+      <div style={{ background: `linear-gradient(135deg, ${BILL_CYAN} 0%, ${BILL_DARK} 100%)`, padding: "28px 24px 20px", borderRadius: "0 0 28px 28px", boxShadow: "0 8px 32px rgba(0,172,193,0.25)" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div>
+            <h1 style={{ margin: 0, fontSize: 26, fontWeight: 700, color: "#fff" }}>💰 חשבונות</h1>
+            <p style={{ margin: "4px 0 0", fontSize: 13, color: "rgba(255,255,255,0.7)", fontWeight: 300 }}>
+              {activeBills.length} לתשלום{totalUnpaid > 0 ? ` · ₪${totalUnpaid.toLocaleString("he-IL")}` : ""}
+            </p>
+          </div>
+          <BackButton onBack={onBack} light />
+        </div>
+      </div>
+
+      <div style={{ padding: "16px 16px 100px" }}>
+        {/* Gmail Scan */}
+        <div style={{ background: "#fff", borderRadius: 16, padding: "14px 16px", marginBottom: 16, boxShadow: "0 2px 10px rgba(0,0,0,0.06)" }}>
+          <button onClick={triggerGmailScan} disabled={scanning}
+            style={{ width: "100%", border: "none", background: scanning ? "#E0F7FA" : `linear-gradient(135deg, ${BILL_CYAN}, ${BILL_DARK})`, color: scanning ? BILL_DARK : "#fff", borderRadius: 12, padding: "12px 16px", fontSize: 15, fontWeight: 600, fontFamily: "inherit", cursor: scanning ? "default" : "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+            {scanning ? "⏳ סורק..." : "📧 סרוק חשבונות מג׳ימייל"}
+          </button>
+          <p style={{ margin: "8px 0 0", fontSize: 11, color: "#BBB", textAlign: "center", lineHeight: 1.5 }}>
+            הסריקה עשויה שלא לזהות את כל החשבונות
+          </p>
+          {scanError && <p style={{ margin: "8px 0 0", fontSize: 13, color: "#E53935", textAlign: "center" }}>⚠️ {scanError}</p>}
+        </div>
+
+        {/* Add form */}
+        {showAdd && (
+          <div style={{ background: "#fff", borderRadius: 20, padding: 20, marginBottom: 16, boxShadow: "0 4px 20px rgba(0,0,0,0.08)", animation: "slideDown 0.3s ease" }}>
+            <h3 style={{ margin: "0 0 12px", fontSize: 16, fontWeight: 600, color: "#2D3436" }}>חשבון חדש</h3>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 14 }}>
+              {BILL_PRESETS.map(p => (
+                <button key={p.name} onClick={() => setProvider(p.name)}
+                  style={{ border: provider === p.name ? `2px solid ${BILL_CYAN}` : "2px solid #E8E5E0", background: provider === p.name ? BILL_BG : "#FAFAFA", borderRadius: 10, padding: "6px 10px", cursor: "pointer", fontSize: 13, fontFamily: "inherit", fontWeight: provider === p.name ? 600 : 400, color: provider === p.name ? BILL_CYAN : "#666", display: "flex", alignItems: "center", gap: 4 }}>
+                  {p.icon} {p.name}
+                </button>
+              ))}
+            </div>
+            <input value={provider} onChange={(e) => setProvider(e.target.value)} placeholder="שם הספק *"
+              style={inputStyle} onFocus={(e) => (e.target.style.borderColor = BILL_CYAN)} onBlur={(e) => (e.target.style.borderColor = "#E8E5E0")} />
+            <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
+              <div style={{ flex: 1 }}>
+                <p style={{ margin: "0 0 6px", fontSize: 13, color: "#888" }}>סכום (₪)</p>
+                <input value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0" type="number" min="0"
+                  style={{ ...inputStyle, textAlign: "left" }} onFocus={(e) => (e.target.style.borderColor = BILL_CYAN)} onBlur={(e) => (e.target.style.borderColor = "#E8E5E0")} />
+              </div>
+              <div style={{ flex: 1 }}>
+                <p style={{ margin: "0 0 6px", fontSize: 13, color: "#888" }}>תאריך לתשלום *</p>
+                <input value={dueDate} onChange={(e) => setDueDate(e.target.value)} type="date"
+                  style={{ ...inputStyle, color: dueDate ? "#2D3436" : "#CCC" }} onFocus={(e) => (e.target.style.borderColor = BILL_CYAN)} onBlur={(e) => (e.target.style.borderColor = "#E8E5E0")} />
+              </div>
+            </div>
+            <input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="הערות (אופציונלי)"
+              style={{ ...inputStyle, marginTop: 10 }} onFocus={(e) => (e.target.style.borderColor = BILL_CYAN)} onBlur={(e) => (e.target.style.borderColor = "#E8E5E0")} />
+            <BillFileArea preview={filePreview} f={file} inputRef={fileInputRef} onChange={handleFileChange} onClear={() => { setFile(null); setFilePreview(null); }} error={fileError} />
+            <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
+              <button onClick={addBill} disabled={!provider.trim() || !dueDate || uploading}
+                style={{ flex: 1, border: "none", background: provider.trim() && dueDate && !uploading ? `linear-gradient(135deg, ${BILL_CYAN}, ${BILL_DARK})` : "#ccc", color: "#fff", borderRadius: 12, padding: "14px", fontSize: 15, fontWeight: 600, fontFamily: "inherit", cursor: provider.trim() && dueDate && !uploading ? "pointer" : "default" }}>
+                {uploading ? "מעלה..." : "שמור ✓"}
+              </button>
+              <button onClick={resetForm}
+                style={{ border: "2px solid #E8E5E0", background: "#fff", color: "#999", borderRadius: 12, padding: "14px 20px", fontSize: 15, fontFamily: "inherit", cursor: "pointer" }}>✕</button>
+            </div>
+          </div>
+        )}
+
+        {activeBills.length === 0 && paidBills.length === 0 && !showAdd && (
+          <div style={{ textAlign: "center", padding: "60px 20px" }}>
+            <div style={{ fontSize: 56, marginBottom: 16 }}>💰</div>
+            <p style={{ fontSize: 18, color: "#999", fontWeight: 300 }}>אין חשבונות שמורים</p>
+            <p style={{ fontSize: 14, color: "#CCC", fontWeight: 300, marginTop: 4 }}>לחצו על + להוספה ידנית</p>
+          </div>
+        )}
+
+        {(activeBills.length > 0 || paidBills.length > 0) && <p style={{ textAlign: "center", fontSize: 12, color: "#BBB", margin: "8px 0 12px", fontWeight: 300 }}>עריכה → | ← מחיקה</p>}
+
+        {/* Active bills */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {activeBills.map((b) => {
+            const urg = getBillUrgency(b);
+            return (
+              <SwipeItem key={b.id} borderRadius={18} onSwipeLeft={() => removeBill(b.id, b)} onSwipeRight={() => openEdit(b)}>
+                <div style={{ background: "#fff", borderRadius: 18, overflow: "hidden", boxShadow: "0 2px 12px rgba(0,0,0,0.06)", borderRight: `5px solid ${urg.border === "transparent" ? "#E8E5E0" : urg.border}` }}>
+                  <div style={{ padding: "14px 16px", display: "flex", alignItems: "center", gap: 12 }}>
+                    <input type="checkbox" checked={false} onChange={() => togglePaid(b)}
+                      style={{ width: 20, height: 20, flexShrink: 0, cursor: "pointer", accentColor: BILL_CYAN }} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                        <span style={{ fontSize: 15, fontWeight: 600, color: "#2D3436" }}>{b.provider}</span>
+                        {b.source === "gmail" && <span style={{ fontSize: 11, color: BILL_DARK, background: BILL_BG, padding: "2px 7px", borderRadius: 8, fontWeight: 500 }}>📧 Gmail</span>}
+                      </div>
+                      <div style={{ fontSize: 13, color: "#888", marginTop: 2 }}>
+                        {b.amount > 0 ? `₪${b.amount.toLocaleString("he-IL")} · ` : ""}
+                        לתשלום עד {b.dueDate ? new Date(b.dueDate).toLocaleDateString("he-IL") : "—"}
+                      </div>
+                    </div>
+                    <span style={{ fontSize: 12, fontWeight: 600, color: urg.color, background: urg.bg, padding: "4px 10px", borderRadius: 10, flexShrink: 0 }}>{urg.label}</span>
+                  </div>
+                </div>
+              </SwipeItem>
+            );
+          })}
+        </div>
+
+        {/* Paid bills */}
+        {paidBills.length > 0 && (
+          <div style={{ marginTop: 24 }}>
+            <p style={{ fontSize: 12, color: "#BBB", fontWeight: 500, marginBottom: 10 }}>שולם</p>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10, opacity: 0.55 }}>
+              {paidBills.map((b) => (
+                <SwipeItem key={b.id} borderRadius={18} onSwipeLeft={() => removeBill(b.id, b)} onSwipeRight={() => openEdit(b)}>
+                  <div style={{ background: "#F5F5F5", borderRadius: 18, overflow: "hidden" }}>
+                    <div style={{ padding: "12px 16px", display: "flex", alignItems: "center", gap: 12 }}>
+                      <input type="checkbox" checked={true} onChange={() => togglePaid(b)}
+                        style={{ width: 20, height: 20, flexShrink: 0, cursor: "pointer", accentColor: BILL_CYAN }} />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <span style={{ fontSize: 14, fontWeight: 500, color: "#AAA", textDecoration: "line-through" }}>{b.provider}</span>
+                        <div style={{ fontSize: 12, color: "#CCC", marginTop: 1 }}>
+                          {b.amount > 0 ? `₪${b.amount.toLocaleString("he-IL")}` : ""}
+                        </div>
+                      </div>
+                      <span style={{ fontSize: 12, color: "#AAA", background: "#EBEBEB", padding: "4px 10px", borderRadius: 10 }}>שולם</span>
+                    </div>
+                  </div>
+                </SwipeItem>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {!showAdd && <FAB onClick={() => setShowAdd(true)} color={`linear-gradient(135deg, ${BILL_CYAN}, ${BILL_DARK})`} shadow="rgba(0,172,193,0.4)" />}
+
+      {/* Undo Delete Toast */}
+      {pendingDelete && (
+        <div style={{ position: "fixed", bottom: 104, left: "50%", transform: "translateX(-50%)", background: "#2D3436", color: "#fff", borderRadius: 14, padding: "12px 18px", display: "flex", alignItems: "center", gap: 14, zIndex: 60, boxShadow: "0 6px 24px rgba(0,0,0,0.3)", whiteSpace: "nowrap", animation: "slideUp 0.25s ease" }}>
+          <span style={{ fontSize: 14 }}>🗑️ "{pendingDelete.bill.provider}" נמחק</span>
+          <button onClick={undoDelete} style={{ background: BILL_CYAN, border: "none", borderRadius: 8, padding: "6px 14px", color: "#fff", fontSize: 13, fontWeight: 600, fontFamily: "inherit", cursor: "pointer" }}>ביטול</button>
+        </div>
+      )}
+
+      {/* Edit Modal */}
+      {editingBill && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 100, display: "flex", alignItems: "flex-end", justifyContent: "center" }} onClick={(e) => { if (e.target === e.currentTarget) closeEdit(); }}>
+          <div dir="rtl" style={{ background: "#fff", borderRadius: "24px 24px 0 0", padding: 24, width: "100%", maxWidth: 480, maxHeight: "90vh", overflowY: "auto", animation: "slideUp 0.3s ease" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+              <h3 style={{ margin: 0, fontSize: 17, fontWeight: 600, color: "#2D3436" }}>✏️ עריכת חשבון</h3>
+              <button onClick={closeEdit} style={{ background: "none", border: "none", fontSize: 22, cursor: "pointer", color: "#999", lineHeight: 1 }}>✕</button>
+            </div>
+            <input value={editProvider} onChange={(e) => setEditProvider(e.target.value)} placeholder="שם הספק *" autoFocus
+              style={inputStyle} onFocus={(e) => (e.target.style.borderColor = BILL_CYAN)} onBlur={(e) => (e.target.style.borderColor = "#E8E5E0")} />
+            <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
+              <div style={{ flex: 1 }}>
+                <p style={{ margin: "0 0 6px", fontSize: 13, color: "#888" }}>סכום (₪)</p>
+                <input value={editAmount} onChange={(e) => setEditAmount(e.target.value)} placeholder="0" type="number" min="0"
+                  style={{ ...inputStyle, textAlign: "left" }} onFocus={(e) => (e.target.style.borderColor = BILL_CYAN)} onBlur={(e) => (e.target.style.borderColor = "#E8E5E0")} />
+              </div>
+              <div style={{ flex: 1 }}>
+                <p style={{ margin: "0 0 6px", fontSize: 13, color: "#888" }}>תאריך לתשלום *</p>
+                <input value={editDueDate} onChange={(e) => setEditDueDate(e.target.value)} type="date"
+                  style={{ ...inputStyle, color: editDueDate ? "#2D3436" : "#CCC" }} onFocus={(e) => (e.target.style.borderColor = BILL_CYAN)} onBlur={(e) => (e.target.style.borderColor = "#E8E5E0")} />
+              </div>
+            </div>
+            <input value={editNotes} onChange={(e) => setEditNotes(e.target.value)} placeholder="הערות (אופציונלי)"
+              style={{ ...inputStyle, marginTop: 10 }} onFocus={(e) => (e.target.style.borderColor = BILL_CYAN)} onBlur={(e) => (e.target.style.borderColor = "#E8E5E0")} />
+            <BillFileArea preview={editFilePreview} f={editFile} inputRef={editFileInputRef} onChange={handleEditFileChange} onClear={() => { setEditFile(null); setEditFilePreview(null); }} error={editFileError} />
+            <div style={{ display: "flex", gap: 8, marginTop: 16, paddingBottom: 8 }}>
+              <button onClick={updateBill} disabled={!editProvider.trim() || !editDueDate || editUploading}
+                style={{ flex: 1, border: "none", background: editProvider.trim() && editDueDate && !editUploading ? `linear-gradient(135deg, ${BILL_CYAN}, ${BILL_DARK})` : "#ccc", color: "#fff", borderRadius: 12, padding: "14px", fontSize: 15, fontWeight: 600, fontFamily: "inherit", cursor: editProvider.trim() && editDueDate && !editUploading ? "pointer" : "default" }}>
+                {editUploading ? "שומר..." : "שמור שינויים ✓"}
+              </button>
+              <button onClick={closeEdit}
+                style={{ border: "2px solid #E8E5E0", background: "#fff", color: "#999", borderRadius: 12, padding: "14px 20px", fontSize: 15, fontFamily: "inherit", cursor: "pointer" }}>✕</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Scan Results Bottom Sheet */}
+      {scanResults !== null && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 100, display: "flex", alignItems: "flex-end", justifyContent: "center" }} onClick={(e) => { if (e.target === e.currentTarget) setScanResults(null); }}>
+          <div dir="rtl" style={{ background: "#fff", borderRadius: "24px 24px 0 0", padding: 24, width: "100%", maxWidth: 480, maxHeight: "80vh", overflowY: "auto", animation: "slideUp 0.3s ease" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+              <h3 style={{ margin: 0, fontSize: 17, fontWeight: 600, color: "#2D3436" }}>📧 תוצאות סריקה</h3>
+              <button onClick={() => setScanResults(null)} style={{ background: "none", border: "none", fontSize: 22, cursor: "pointer", color: "#999", lineHeight: 1 }}>✕</button>
+            </div>
+            {scanResults.length === 0 ? (
+              <p style={{ textAlign: "center", color: "#AAA", padding: "20px 0" }}>לא נמצאו חשבונות חדשים בג׳ימייל</p>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                {scanResults.map((r, i) => (
+                  <div key={i} style={{ background: "#F9F9F9", borderRadius: 14, padding: "14px 16px", display: "flex", alignItems: "center", gap: 12 }}>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 15, fontWeight: 600, color: "#2D3436" }}>{r.provider}</div>
+                      <div style={{ fontSize: 13, color: "#888", marginTop: 2 }}>
+                        {r.amount > 0 ? `₪${r.amount.toLocaleString("he-IL")} · ` : ""}
+                        {r.dueDate ? new Date(r.dueDate).toLocaleDateString("he-IL") : ""}
+                      </div>
+                    </div>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <button onClick={() => acceptScanResult(r)}
+                        style={{ border: "none", background: `linear-gradient(135deg, ${BILL_CYAN}, ${BILL_DARK})`, color: "#fff", borderRadius: 10, padding: "8px 14px", fontSize: 13, fontWeight: 600, fontFamily: "inherit", cursor: "pointer" }}>הוסף</button>
+                      <button onClick={() => setScanResults(prev => prev.filter((_, j) => j !== i))}
+                        style={{ border: "2px solid #E8E5E0", background: "#fff", color: "#999", borderRadius: 10, padding: "8px 12px", fontSize: 13, fontFamily: "inherit", cursor: "pointer" }}>דלג</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      <GlobalStyles />
+    </div>
+  );
+}
+
 // ─── ImageLightbox ────────────────────────────────────────────────────────────
 
 function ImageLightbox({ src, onClose }) {
@@ -3592,6 +4041,7 @@ export default function GroceryApp() {
   if (screen === "subscriptions")  return <SubscriptionsScreen  userName={userName} householdId={householdId} onBack={() => setScreen("home")} />;
   if (screen === "personal_docs")  return <PersonalDocsScreen   userName={userName} householdId={householdId} onBack={() => setScreen("home")} />;
   if (screen === "service_providers") return <ServiceProvidersScreen userName={userName} householdId={householdId} onBack={() => setScreen("home")} />;
+  if (screen === "bills")             return <BillsScreen             userName={userName} householdId={householdId} onBack={() => setScreen("home")} />;
   return (
     <HomeScreen
       userName={userName}

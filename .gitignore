@@ -12,6 +12,10 @@ dist
 dist-ssr
 *.local
 
+# Firebase Functions secrets and deps
+functions/.env
+functions/node_modules/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

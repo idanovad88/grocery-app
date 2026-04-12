@@ -1,0 +1,23 @@
+{
+  "name": "grocery-app-functions",
+  "description": "Cloud Functions for grocery-app",
+  "scripts": {
+    "serve": "firebase emulators:start --only functions",
+    "shell": "firebase functions:shell",
+    "start": "npm run shell",
+    "deploy": "firebase deploy --only functions",
+    "logs": "firebase functions:log"
+  },
+  "engines": {
+    "node": "20"
+  },
+  "main": "index.js",
+  "dependencies": {
+    "firebase-admin": "^12.0.0",
+    "firebase-functions": "^5.0.0",
+    "googleapis": "^140.0.0",
+    "@anthropic-ai/sdk": "^0.27.0",
+    "pdf-parse": "^1.1.1"
+  },
+  "private": true
+}
