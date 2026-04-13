@@ -38,7 +38,7 @@ exports.scanGmailBills = onCall(
     try {
       const list = await gmail.users.messages.list({
         userId: "me",
-        q: 'subject:(חשבון OR invoice OR "לתשלום") newer_than:60d',
+        q: 'subject:(חשבון OR חשבונית OR invoice OR "לתשלום") newer_than:60d',
         maxResults: 30,
       });
       messages = list.data.messages || [];
