@@ -42,6 +42,7 @@ exports.scanGmailBills = onCall(
         maxResults: 30,
       });
       messages = list.data.messages || [];
+      console.log(`Gmail search found ${messages.length} messages`);
     } catch (err) {
       console.error("Gmail list error:", err.message);
       throw new HttpsError("internal", "Failed to list Gmail messages");
@@ -107,7 +108,8 @@ exports.scanGmailBills = onCall(
       };
       await processPdfs(payload.parts);
 
-      if (!text.trim()) continue;
+      console.log(`Message ${msgId}: extracted ${text.length} chars of text`);
+      if (!text.trim()) { console.log(`Message ${msgId}: skipped (no text)`); continue; }
 
       // Send text to Claude Haiku for structured extraction
       try {
