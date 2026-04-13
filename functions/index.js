@@ -114,6 +114,7 @@ exports.scanGmailBills = onCall(
       // Send text to Claude Haiku for structured extraction
       try {
         const today    = new Date().toISOString().split("T")[0];
+        console.log(`Message ${msgId}: sending to Claude. Text preview: ${text.slice(0, 200)}`);
         const response = await anthropic.messages.create({
           model: "claude-haiku-4-5-20251001",
           max_tokens: 512,
@@ -130,6 +131,7 @@ ${text.slice(0, 5000)}`,
 
         const raw       = response.content[0].text.trim()
           .replace(/^```(?:json)?\n?/, "").replace(/\n?```$/, "");
+        console.log(`Message ${msgId}: Claude returned: ${raw.slice(0, 300)}`);
         const extracted = JSON.parse(raw);
 
         for (const bill of extracted) {
@@ -143,8 +145,8 @@ ${text.slice(0, 5000)}`,
             });
           }
         }
-      } catch {
-        // Claude or JSON parse failure — skip this message
+      } catch (e) {
+        console.error(`Message ${msgId}: Claude/parse error: ${e.message}`);
       }
     }
 
