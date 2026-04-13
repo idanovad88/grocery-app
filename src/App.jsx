@@ -3401,18 +3401,6 @@ function BillsScreen({ userName, householdId, onBack }) {
       </div>
 
       <div style={{ padding: "16px 16px 100px" }}>
-        {/* Gmail Scan */}
-        <div style={{ background: "#fff", borderRadius: 16, padding: "14px 16px", marginBottom: 16, boxShadow: "0 2px 10px rgba(0,0,0,0.06)" }}>
-          <button onClick={triggerGmailScan} disabled={scanning}
-            style={{ width: "100%", border: "none", background: scanning ? "#E0F7FA" : `linear-gradient(135deg, ${BILL_CYAN}, ${BILL_DARK})`, color: scanning ? BILL_DARK : "#fff", borderRadius: 12, padding: "12px 16px", fontSize: 15, fontWeight: 600, fontFamily: "inherit", cursor: scanning ? "default" : "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
-            {scanning ? "⏳ סורק..." : "📧 סרוק חשבונות מג׳ימייל"}
-          </button>
-          <p style={{ margin: "8px 0 0", fontSize: 11, color: "#BBB", textAlign: "center", lineHeight: 1.5 }}>
-            הסריקה עשויה שלא לזהות את כל החשבונות
-          </p>
-          {scanError && <p style={{ margin: "8px 0 0", fontSize: 13, color: "#E53935", textAlign: "center" }}>⚠️ {scanError}</p>}
-        </div>
-
         {/* Add form */}
         {showAdd && (
           <div style={{ background: "#fff", borderRadius: 20, padding: 20, marginBottom: 16, boxShadow: "0 4px 20px rgba(0,0,0,0.08)", animation: "slideDown 0.3s ease" }}>
@@ -3561,41 +3549,6 @@ function BillsScreen({ userName, householdId, onBack }) {
               <button onClick={closeEdit}
                 style={{ border: "2px solid #E8E5E0", background: "#fff", color: "#999", borderRadius: 12, padding: "14px 20px", fontSize: 15, fontFamily: "inherit", cursor: "pointer" }}>✕</button>
             </div>
-          </div>
-        </div>
-      )}
-
-      {/* Scan Results Bottom Sheet */}
-      {scanResults !== null && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 100, display: "flex", alignItems: "flex-end", justifyContent: "center" }} onClick={(e) => { if (e.target === e.currentTarget) setScanResults(null); }}>
-          <div dir="rtl" style={{ background: "#fff", borderRadius: "24px 24px 0 0", padding: 24, width: "100%", maxWidth: 480, maxHeight: "80vh", overflowY: "auto", animation: "slideUp 0.3s ease" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-              <h3 style={{ margin: 0, fontSize: 17, fontWeight: 600, color: "#2D3436" }}>📧 תוצאות סריקה</h3>
-              <button onClick={() => setScanResults(null)} style={{ background: "none", border: "none", fontSize: 22, cursor: "pointer", color: "#999", lineHeight: 1 }}>✕</button>
-            </div>
-            {scanResults.length === 0 ? (
-              <p style={{ textAlign: "center", color: "#AAA", padding: "20px 0" }}>לא נמצאו חשבונות חדשים בג׳ימייל</p>
-            ) : (
-              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                {scanResults.map((r, i) => (
-                  <div key={i} style={{ background: "#F9F9F9", borderRadius: 14, padding: "14px 16px", display: "flex", alignItems: "center", gap: 12 }}>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 15, fontWeight: 600, color: "#2D3436" }}>{r.provider}</div>
-                      <div style={{ fontSize: 13, color: "#888", marginTop: 2 }}>
-                        {r.amount > 0 ? `₪${r.amount.toLocaleString("he-IL")} · ` : ""}
-                        {r.dueDate ? new Date(r.dueDate).toLocaleDateString("he-IL") : ""}
-                      </div>
-                    </div>
-                    <div style={{ display: "flex", gap: 8 }}>
-                      <button onClick={() => acceptScanResult(r)}
-                        style={{ border: "none", background: `linear-gradient(135deg, ${BILL_CYAN}, ${BILL_DARK})`, color: "#fff", borderRadius: 10, padding: "8px 14px", fontSize: 13, fontWeight: 600, fontFamily: "inherit", cursor: "pointer" }}>הוסף</button>
-                      <button onClick={() => setScanResults(prev => prev.filter((_, j) => j !== i))}
-                        style={{ border: "2px solid #E8E5E0", background: "#fff", color: "#999", borderRadius: 10, padding: "8px 12px", fontSize: 13, fontFamily: "inherit", cursor: "pointer" }}>דלג</button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
           </div>
         </div>
       )}
