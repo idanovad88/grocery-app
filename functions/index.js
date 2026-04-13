@@ -38,7 +38,7 @@ exports.scanGmailBills = onCall(
     try {
       const list = await gmail.users.messages.list({
         userId: "me",
-        q: 'newer_than:60d has:attachment OR newer_than:7d',
+        q: 'subject:(חשבון OR חשבונית OR invoice OR לתשלום OR חיוב) newer_than:60d',
         maxResults: 30,
       });
       messages = list.data.messages || [];
@@ -68,11 +68,27 @@ exports.scanGmailBills = onCall(
       const decodeB64 = (data) =>
         Buffer.from(data.replace(/-/g, "+").replace(/_/g, "/"), "base64").toString("utf-8");
 
-      // Recursively extract plain-text body parts
+      // Strip HTML tags to get readable text
+      const stripHtml = (html) =>
+        html.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
+            .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
+            .replace(/<[^>]+>/g, " ")
+            .replace(/&nbsp;/g, " ").replace(/&amp;/g, "&")
+            .replace(/&lt;/g, "<").replace(/&gt;/g, ">")
+            .replace(/\s{2,}/g, " ").trim();
+
+      // Include email subject as context for Claude
+      const headers = msg.data.payload?.headers || [];
+      const subject = headers.find(h => h.name.toLowerCase() === "subject")?.value || "";
+      if (subject) text += `נושא: ${subject}\n`;
+
+      // Recursively extract plain-text and HTML body parts
       const extractTextParts = (parts) => {
         for (const p of parts || []) {
           if (p.mimeType === "text/plain" && p.body?.data)
             text += decodeB64(p.body.data) + "\n";
+          else if (p.mimeType === "text/html" && p.body?.data)
+            text += stripHtml(decodeB64(p.body.data)) + "\n";
           if (p.parts) extractTextParts(p.parts);
         }
       };
@@ -81,7 +97,8 @@ exports.scanGmailBills = onCall(
       if (payload.parts) {
         extractTextParts(payload.parts);
       } else if (payload.body?.data) {
-        text = decodeB64(payload.body.data);
+        const raw = decodeB64(payload.body.data);
+        text += payload.mimeType === "text/html" ? stripHtml(raw) : raw;
       }
 
       // Recursively extract and parse PDF attachments (≤ 8 MB)
@@ -120,9 +137,23 @@ exports.scanGmailBills = onCall(
           max_tokens: 512,
           messages: [{
             role: "user",
-            content: `Today is ${today}. Extract bill payment requests from the following text (Hebrew or English).
+            content: `Today is ${today}. You are extracting household bill payment requests from Israeli company emails (Hebrew or English).
+
 Return ONLY a valid JSON array: [{ "provider": string, "amount": number, "dueDate": "YYYY-MM-DD" }]
 If no bill is found, return []. No explanation, no markdown.
+
+Rules:
+- provider: the company name (e.g. "מנהרות הכרמל", "חברת חשמל", "בזק", "HOT", "עיריית חיפה")
+- amount: the total amount due in ₪ (look for: סכום לתשלום, סה"כ, לתשלום, חיוב, total)
+- dueDate: payment due date in YYYY-MM-DD format (look for: תאריך לתשלום, תאריך פירעון, יש לשלם עד, due date)
+- If due date is missing, estimate 30 days from today
+
+Examples of Israeli bill patterns:
+- "סכום לתשלום: 287.50 ₪" → amount: 287.50
+- "תאריך פירעון: 15/05/2026" → dueDate: "2026-05-15"
+- "החשבונית החודשית שלך ממנהרות הכרמל" → provider: "מנהרות הכרמל"
+- "סה"כ לתשלום: 189 ש"ח" → amount: 189
+- "יש לשלם עד 30/04/2026" → dueDate: "2026-04-30"
 
 TEXT:
 ${text.slice(0, 5000)}`,
