@@ -3276,16 +3276,23 @@ function BillsScreen({ userName, householdId, onBack }) {
     } catch (e) { console.error(e); }
   };
 
-  const removeBill = (id, billData) => {
+  const removeBill = async (id, billData) => {
     if (pendingDelete) clearTimeout(pendingDelete.timerId);
-    const timerId = setTimeout(async () => {
-      try { await deleteDoc(doc(db, "households", householdId, "bills", id)); } catch (e) { console.error(e); }
-      setPendingDelete(null);
-    }, 4500);
+    try { await deleteDoc(doc(db, "households", householdId, "bills", id)); } catch (e) { console.error(e); return; }
+    const timerId = setTimeout(() => setPendingDelete(null), 4500);
     setPendingDelete({ id, bill: billData, timerId });
   };
 
-  const undoDelete = () => { if (pendingDelete) { clearTimeout(pendingDelete.timerId); setPendingDelete(null); } };
+  const undoDelete = async () => {
+    if (!pendingDelete) return;
+    clearTimeout(pendingDelete.timerId);
+    const { id, bill } = pendingDelete;
+    setPendingDelete(null);
+    try {
+      const { id: _id, ...data } = bill;
+      await setDoc(doc(db, "households", householdId, "bills", id), data);
+    } catch (e) { console.error(e); }
+  };
 
   const openEdit = (b) => {
     setEditingBill(b); setEditProvider(b.provider); setEditAmount(String(b.amount || ""));
