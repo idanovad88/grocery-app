@@ -64,7 +64,6 @@ const MODULES = [
   { id: "bills",         icon: "💰", label: "חשבונות",       desc: "מעקב חשבונות ותשלומים",        color: "#00ACC1", bg: "#E0F7FA", available: true  },
   { id: "personal_docs", icon: "📄", label: "מסמכים אישיים", desc: "תעודות, רישיונות, מסמכים סרוקים", color: "#5E35B1", bg: "#EDE7F6", available: true  },
   { id: "service_providers", icon: "🛠️", label: "אנשי מקצוע", desc: "רשימת טלפונים — חשמלאי, אינסטלטור ועוד", color: "#EF6C00", bg: "#FFF3E0", available: true  },
-  { id: "receipts",      icon: "🧾", label: "קבלות",         desc: "ארגון קבלות ותשלומים",     color: "#2980B9", bg: "#EBF5FB", available: false },
 ];
 
 // ─── Invite-code expiry ───────────────────────────────────────────────────────
