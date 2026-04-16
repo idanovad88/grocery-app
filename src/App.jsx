@@ -4148,6 +4148,11 @@ function SplitBillsScreen({ userName, householdId, memberNames, currentUid, onBa
                 }}>
                   {split.paid ? "✓ שולם" : "✗"}
                 </button>
+                <button
+                  onClick={() => setDetailSplits(prev => prev.filter(s => s.uid !== split.uid))}
+                  title="הסר מהחשבון"
+                  style={{ padding: "8px 10px", borderRadius: 10, border: "none", flexShrink: 0, background: "#FFEBEE", color: "#E53935", fontSize: 14, fontFamily: "inherit", cursor: "pointer" }}
+                >✕</button>
               </div>
             ))}
 
