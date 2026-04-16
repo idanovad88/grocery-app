@@ -73,6 +73,11 @@ service firebase.storage {
       allow write: if isMember(hid) && okType() && okSize();
     }
 
+    match /households/{hid}/split_bills/{file} {
+      allow read:  if isMember(hid);
+      allow write: if isMember(hid) && okType() && okSize();
+    }
+
     // Deny everything else — including legacy flat paths like
     // /coupons/*, /insurance/*, /subscriptions/*, /personal_docs/*.
     // Old files remain in the bucket but are no longer readable; delete

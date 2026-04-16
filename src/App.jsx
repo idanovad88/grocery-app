@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { initializeApp } from "firebase/app";
 import { getFirestore, collection, addDoc, deleteDoc, updateDoc, doc, getDoc, onSnapshot, query, orderBy, getDocs, where, setDoc, arrayUnion, limit } from "firebase/firestore";
 import {
@@ -64,7 +64,8 @@ const MODULES = [
   { id: "bills",         icon: "💰", label: "חשבונות",       desc: "מעקב חשבונות ותשלומים",        color: "#00ACC1", bg: "#E0F7FA", available: true  },
   { id: "personal_docs", icon: "📄", label: "מסמכים אישיים", desc: "תעודות, רישיונות, מסמכים סרוקים", color: "#5E35B1", bg: "#EDE7F6", available: true  },
   { id: "service_providers", icon: "🛠️", label: "אנשי מקצוע", desc: "רשימת טלפונים — חשמלאי, אינסטלטור ועוד", color: "#EF6C00", bg: "#FFF3E0", available: true  },
-  { id: "receipts",      icon: "🧾", label: "קבלות",         desc: "ארגון קבלות ותשלומים",     color: "#2980B9", bg: "#EBF5FB", available: false },
+  // ── Optional modules (activated per household) ──
+  { id: "split_bills", icon: "🤝", label: "חלוקת חשבונות", desc: "חלוקת חשבונות בין שותפים", color: "#7B1FA2", bg: "#F3E5F5", available: true, optional: true },
 ];
 
 // ─── Invite-code expiry ───────────────────────────────────────────────────────
@@ -617,9 +618,10 @@ function HouseholdPickerScreen({ userName, households, onSelect, onAddHousehold,
 
 // ─── HomeScreen ───────────────────────────────────────────────────────────────
 
-function HomeScreen({ userName, householdName, inviteCode, inviteCodeExpiry, onRotateInvite, onNavigate, onSwitchHousehold, householdId, memberNames, currentUid }) {
+function HomeScreen({ userName, householdName, inviteCode, inviteCodeExpiry, onRotateInvite, onNavigate, onSwitchHousehold, householdId, memberNames, currentUid, enabledModules = [], onToggleModule }) {
   const storageKey = `module-order-${householdId}`;
   const [showInvite, setShowInvite] = useState(false);
+  const [showManageModules, setShowManageModules] = useState(false);
   const [moduleOrder, setModuleOrder] = useState(() => {
     try {
       const saved = localStorage.getItem(storageKey);
@@ -640,7 +642,10 @@ function HomeScreen({ userName, householdName, inviteCode, inviteCodeExpiry, onR
   const listRef = useRef(null);
   const pRef    = useRef({ active: false, startY: 0, startIdx: 0, itemH: 88 });
 
-  const orderedModules = moduleOrder.map(id => MODULES.find(m => m.id === id)).filter(Boolean);
+  const orderedModules = moduleOrder
+    .map(id => MODULES.find(m => m.id === id))
+    .filter(Boolean)
+    .filter(m => !m.optional || enabledModules.includes(m.id));
 
   const handleDragStart = (e, index) => {
     e.preventDefault();
@@ -801,7 +806,66 @@ function HomeScreen({ userName, householdName, inviteCode, inviteCodeExpiry, onR
             </div>
           );
         })}
+
+        {/* Manage modules button */}
+        {MODULES.some(m => m.optional) && (
+          <button
+            onClick={() => setShowManageModules(true)}
+            style={{
+              width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+              background: "#fff", border: "2px dashed #DDD", borderRadius: 20, padding: "16px",
+              fontSize: 14, fontWeight: 600, color: "#888", fontFamily: "inherit", cursor: "pointer",
+              marginTop: 4,
+            }}
+          >
+            ⚙️ נהל מודולים
+          </button>
+        )}
       </div>
+
+      {/* Manage modules bottom sheet */}
+      {showManageModules && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 100, display: "flex", alignItems: "flex-end", justifyContent: "center" }} onClick={(e) => { if (e.target === e.currentTarget) setShowManageModules(false); }}>
+          <div dir="rtl" style={{ background: "#fff", borderRadius: "24px 24px 0 0", padding: 28, width: "100%", maxWidth: 480, animation: "slideUp 0.3s ease" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+              <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: "#2D3436" }}>⚙️ מודולים אופציונליים</h3>
+              <button onClick={() => setShowManageModules(false)} style={{ background: "none", border: "none", fontSize: 22, cursor: "pointer", color: "#999", lineHeight: 1 }}>✕</button>
+            </div>
+            <p style={{ margin: "0 0 20px", fontSize: 13, color: "#888" }}>הפעל מודולים נוספים עבור משק הבית</p>
+            {MODULES.filter(m => m.optional).map(mod => {
+              const isEnabled = enabledModules.includes(mod.id);
+              return (
+                <div key={mod.id} style={{ display: "flex", alignItems: "center", gap: 14, padding: "14px 0", borderBottom: "1px solid #F0EDE8" }}>
+                  <div style={{ width: 48, height: 48, borderRadius: 14, background: mod.bg, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 24, flexShrink: 0 }}>
+                    {mod.icon}
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 15, fontWeight: 600, color: "#2D3436" }}>{mod.label}</div>
+                    <div style={{ fontSize: 12, color: "#AAA" }}>{mod.desc}</div>
+                  </div>
+                  <button
+                    onClick={() => onToggleModule && onToggleModule(mod.id, !isEnabled)}
+                    style={{
+                      width: 52, height: 28, borderRadius: 14, border: "none", cursor: "pointer",
+                      background: isEnabled ? mod.color : "#DDD",
+                      position: "relative", transition: "background 0.2s", flexShrink: 0,
+                    }}
+                  >
+                    <div style={{
+                      position: "absolute", top: 3, width: 22, height: 22, borderRadius: "50%",
+                      background: "#fff", transition: "right 0.2s, left 0.2s",
+                      right: isEnabled ? 3 : undefined,
+                      left: isEnabled ? undefined : 3,
+                      boxShadow: "0 1px 4px rgba(0,0,0,0.2)",
+                    }} />
+                  </button>
+                </div>
+              );
+            })}
+            <div style={{ paddingBottom: 8 }} />
+          </div>
+        </div>
+      )}
 
       {/* Invite modal */}
       {showInvite && (() => {
@@ -3612,6 +3676,505 @@ function GlobalStyles() {
   );
 }
 
+// ─── SplitBillsScreen ─────────────────────────────────────────────────────────
+
+function SplitBillsScreen({ userName, householdId, memberNames, currentUid, onBack }) {
+  const PURPLE    = "#7B1FA2";
+  const PURPLE_BG = "#F3E5F5";
+
+  const [bills,      setBills]      = useState([]);
+  const [loading,    setLoading]    = useState(true);
+  const [showAdd,    setShowAdd]    = useState(false);
+  const [editBill,   setEditBill]   = useState(null);
+  const [detailBill, setDetailBill] = useState(null);
+  const [detailSplits, setDetailSplits] = useState([]);
+  const [duplicateTarget, setDuplicateTarget] = useState(null);
+  const [dupDate,    setDupDate]    = useState("");
+  const [toast,      setToast]      = useState(null);
+  const [uploading,  setUploading]  = useState(false);
+
+  // Add-form state
+  const [company,  setCompany]  = useState("");
+  const [amount,   setAmount]   = useState("");
+  const [dueDate,  setDueDate]  = useState("");
+  const [notes,    setNotes]    = useState("");
+  const [formFile, setFormFile] = useState(null);
+
+  // Edit-form state
+  const [editCompany, setEditCompany] = useState("");
+  const [editAmount,  setEditAmount]  = useState("");
+  const [editDueDate, setEditDueDate] = useState("");
+  const [editNotes,   setEditNotes]   = useState("");
+
+  const COMPANY_PRESETS = ["חשמל", "מים", "גז", "ועד בית", "ארנונה", "אינטרנט", "שכירות"];
+
+  // ── Load bills ──
+  useEffect(() => {
+    if (!householdId) return;
+    setLoading(true);
+    const q = query(
+      collection(db, "households", householdId, "splitBills"),
+      orderBy("createdAt", "desc")
+    );
+    const unsub = onSnapshot(q,
+      (snap) => { setBills(snap.docs.map(d => ({ id: d.id, ...d.data() }))); setLoading(false); },
+      (err)  => { console.error(err); setLoading(false); }
+    );
+    return () => unsub();
+  }, [householdId]);
+
+  // ── Balance per member (sum of unpaid split amounts across all bills) ──
+  const balances = useMemo(() => {
+    const bal = {};
+    for (const bill of bills) {
+      for (const split of (bill.splits || [])) {
+        if (!split.paid) bal[split.uid] = (bal[split.uid] || 0) + (split.amount || 0);
+      }
+    }
+    return bal;
+  }, [bills]);
+
+  // ── Urgency helpers ──
+  const today = new Date().toISOString().slice(0, 10);
+  const soon7 = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10);
+
+  const getBillStatus = (bill) => {
+    const splits = bill.splits || [];
+    const allPaid = splits.length > 0 && splits.every(s => s.paid);
+    if (allPaid) return "paid";
+    if (!bill.dueDate) return "upcoming";
+    if (bill.dueDate < today) return "overdue";
+    if (bill.dueDate <= soon7) return "soon";
+    return "upcoming";
+  };
+
+  const urgencyOrder = { overdue: 0, soon: 1, upcoming: 2, paid: 3 };
+  const sortedBills  = [...bills].sort((a, b) => {
+    const ao = urgencyOrder[getBillStatus(a)];
+    const bo = urgencyOrder[getBillStatus(b)];
+    if (ao !== bo) return ao - bo;
+    return (a.dueDate || "").localeCompare(b.dueDate || "");
+  });
+  const activeBills = sortedBills.filter(b => getBillStatus(b) !== "paid");
+  const paidBills   = sortedBills.filter(b => getBillStatus(b) === "paid");
+
+  const getBorderColor = (status) =>
+    status === "overdue" ? "#E53935" : status === "soon" ? "#F9A825" : status === "paid" ? "#B0BEC5" : "#43A047";
+
+  // ── Equal split helper ──
+  const makeEqualSplits = (totalAmt, members) => {
+    const uids = Object.keys(members);
+    if (!uids.length) return [];
+    const perPerson = Math.round((parseFloat(totalAmt) || 0) / uids.length * 100) / 100;
+    const splits = uids.map(uid => ({ uid, name: members[uid], amount: perPerson, paid: false, paidAt: null }));
+    const diff = Math.round(((parseFloat(totalAmt) || 0) - splits.reduce((s, sp) => s + sp.amount, 0)) * 100) / 100;
+    if (splits.length) splits[0].amount = Math.round((splits[0].amount + diff) * 100) / 100;
+    return splits;
+  };
+
+  // ── CRUD ──
+  const addBill = async () => {
+    if (!company.trim() || !amount || !dueDate) return;
+    setUploading(true);
+    try {
+      let fileUrl = "", filePath = "", fileType = "";
+      if (formFile) {
+        filePath = `households/${householdId}/split_bills/${Date.now()}_${formFile.name}`;
+        const sRef = ref(storage, filePath);
+        await uploadBytes(sRef, formFile, { contentType: formFile.type });
+        fileUrl  = await getDownloadURL(sRef);
+        fileType = formFile.type;
+      }
+      await addDoc(collection(db, "households", householdId, "splitBills"), {
+        company: company.trim(), amount: parseFloat(amount) || 0, dueDate,
+        notes: notes.trim(), fileUrl, filePath, fileType,
+        addedBy: userName, createdAt: new Date().toISOString(),
+        splits: makeEqualSplits(amount, memberNames),
+      });
+      setCompany(""); setAmount(""); setDueDate(""); setNotes(""); setFormFile(null);
+      setShowAdd(false);
+    } catch (e) { console.error(e); }
+    setUploading(false);
+  };
+
+  const deleteBill = async (bill) => {
+    try {
+      await deleteDoc(doc(db, "households", householdId, "splitBills", bill.id));
+      setToast({ msg: `חשבון "${bill.company}" נמחק`, undo: () => restoreBill(bill) });
+      setTimeout(() => setToast(null), 4500);
+    } catch (e) { console.error(e); }
+  };
+
+  const restoreBill = async (bill) => {
+    try { const { id, ...data } = bill; await setDoc(doc(db, "households", householdId, "splitBills", id), data); }
+    catch (e) { console.error(e); }
+    setToast(null);
+  };
+
+  const openEdit = (bill) => {
+    setEditBill(bill);
+    setEditCompany(bill.company || "");
+    setEditAmount(String(bill.amount || ""));
+    setEditDueDate(bill.dueDate || "");
+    setEditNotes(bill.notes || "");
+  };
+
+  const saveEdit = async () => {
+    if (!editBill) return;
+    try {
+      await updateDoc(doc(db, "households", householdId, "splitBills", editBill.id), {
+        company: editCompany.trim(), amount: parseFloat(editAmount) || 0,
+        dueDate: editDueDate, notes: editNotes.trim(),
+      });
+      setEditBill(null);
+    } catch (e) { console.error(e); }
+  };
+
+  // ── Bill detail sheet ──
+  const openDetail = (bill) => {
+    setDetailBill(bill);
+    setDetailSplits((bill.splits || []).map(s => ({ ...s })));
+  };
+  const closeDetail = () => { setDetailBill(null); setDetailSplits([]); };
+
+  const updateSplitAmount = (uid, val) =>
+    setDetailSplits(prev => prev.map(s => s.uid === uid ? { ...s, amount: parseFloat(val) || 0 } : s));
+
+  const togglePaid = (uid) =>
+    setDetailSplits(prev => prev.map(s => {
+      if (s.uid !== uid) return s;
+      const nowPaid = !s.paid;
+      return { ...s, paid: nowPaid, paidAt: nowPaid ? new Date().toISOString() : null };
+    }));
+
+  const equalSplitDetail = () => {
+    if (!detailBill) return;
+    const memberMap = Object.fromEntries(detailSplits.map(s => [s.uid, s.name]));
+    const eq = makeEqualSplits(detailBill.amount, memberMap);
+    setDetailSplits(prev => prev.map(s => {
+      const found = eq.find(e => e.uid === s.uid);
+      return found ? { ...s, amount: found.amount } : s;
+    }));
+  };
+
+  const saveSplits = async () => {
+    if (!detailBill || !splitValid) return;
+    try {
+      await updateDoc(doc(db, "households", householdId, "splitBills", detailBill.id), { splits: detailSplits });
+      closeDetail();
+    } catch (e) { console.error(e); }
+  };
+
+  const splitSum   = detailSplits.reduce((s, sp) => s + (sp.amount || 0), 0);
+  const splitValid = detailBill ? Math.abs(splitSum - detailBill.amount) < 0.01 : true;
+
+  // ── WhatsApp share ──
+  const shareWhatsApp = () => {
+    if (!detailBill) return;
+    const fmt = (d) => { if (!d) return ""; const [y,m,day]=d.split("-"); return `${day}/${m}/${y}`; };
+    const text = [
+      `חשבון: ${detailBill.company} — ₪${detailBill.amount}`,
+      `תאריך לתשלום: ${fmt(detailBill.dueDate)}`,
+      "",
+      ...detailSplits.map(s => `${s.name}: ₪${s.amount} ${s.paid ? "✓ שולם" : "✗ לא שולם"}`),
+    ].join("\n");
+    window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, "_blank");
+  };
+
+  // ── Duplicate bill ──
+  const duplicateBill = async () => {
+    if (!duplicateTarget || !dupDate) return;
+    try {
+      const { id, createdAt, ...rest } = duplicateTarget;
+      const newSplits = (rest.splits || []).map(s => ({ ...s, paid: false, paidAt: null }));
+      await addDoc(collection(db, "households", householdId, "splitBills"), {
+        ...rest, dueDate: dupDate, splits: newSplits, createdAt: new Date().toISOString(),
+      });
+      setDuplicateTarget(null); setDupDate("");
+    } catch (e) { console.error(e); }
+  };
+
+  const fmtDate = (d) => { if (!d) return ""; const [y,m,day]=d.split("-"); return `${day}/${m}/${y}`; };
+
+  // ─── Render ───────────────────────────────────────────────────────────────
+  const BillCard = ({ bill, dimmed }) => {
+    const status     = getBillStatus(bill);
+    const paidCount  = (bill.splits || []).filter(s => s.paid).length;
+    const totalCount = (bill.splits || []).length;
+    const border     = getBorderColor(status);
+    return (
+      <SwipeItem key={bill.id} onSwipeLeft={() => deleteBill(bill)} onSwipeRight={() => openEdit(bill)}>
+        <div
+          onClick={() => openDetail(bill)}
+          style={{
+            background: "#fff", borderRadius: 16, padding: "14px 16px", marginBottom: 10,
+            boxShadow: "0 2px 8px rgba(0,0,0,0.06)",
+            borderRight: `4px solid ${border}`,
+            opacity: dimmed ? 0.65 : 1, cursor: "pointer",
+          }}
+        >
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 16, fontWeight: 600, color: "#2D3436" }}>{bill.company}</div>
+              <div style={{ fontSize: 13, color: "#888", marginTop: 2 }}>
+                {bill.dueDate ? `עד ${fmtDate(bill.dueDate)}` : ""}
+                {status === "overdue" && <span style={{ color: "#E53935", fontWeight: 600, marginRight: 6 }}>⚠️ באיחור</span>}
+              </div>
+              <div style={{ fontSize: 12, color: "#AAA", marginTop: 4 }}>{paidCount}/{totalCount} שילמו</div>
+            </div>
+            <div style={{ fontSize: 18, fontWeight: 700, color: dimmed ? "#888" : PURPLE }}>₪{bill.amount}</div>
+          </div>
+        </div>
+      </SwipeItem>
+    );
+  };
+
+  return (
+    <div dir="rtl" style={{ fontFamily: "'Rubik', sans-serif", maxWidth: 480, margin: "0 auto", minHeight: "100vh", background: "linear-gradient(165deg, #FAFAFA 0%, #F0EDE8 100%)" }}>
+
+      {/* ── Header ── */}
+      <div style={{ background: `linear-gradient(135deg, ${PURPLE} 0%, #4A148C 100%)`, padding: "36px 24px 24px", borderRadius: "0 0 32px 32px", boxShadow: "0 8px 32px rgba(123,31,162,0.25)", marginBottom: 24 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+          <div>
+            <BackButton onBack={onBack} />
+            <h1 style={{ margin: "12px 0 4px", fontSize: 26, fontWeight: 700, color: "#fff" }}>🤝 חלוקת חשבונות</h1>
+          </div>
+        </div>
+
+        {/* Balance row */}
+        {Object.keys(memberNames).length > 0 && (
+          <div style={{ marginTop: 16, display: "flex", gap: 10, overflowX: "auto", paddingBottom: 4 }}>
+            {Object.entries(memberNames).map(([uid, name]) => {
+              const bal    = balances[uid] || 0;
+              const isPaid = bal === 0;
+              return (
+                <div key={uid} style={{
+                  flexShrink: 0, borderRadius: 12, padding: "8px 14px", minWidth: 90, textAlign: "center",
+                  background: isPaid ? "rgba(67,160,71,0.25)" : "rgba(229,57,53,0.25)",
+                  border: `1px solid ${isPaid ? "rgba(67,160,71,0.5)" : "rgba(229,57,53,0.5)"}`,
+                }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: "#fff" }}>{name}</div>
+                  {isPaid
+                    ? <div style={{ fontSize: 12, color: "rgba(255,255,255,0.8)" }}>✓ מעודכן</div>
+                    : <div style={{ fontSize: 12, color: "rgba(255,255,255,0.9)", fontWeight: 700 }}>₪{bal.toFixed(0)} לתשלום</div>
+                  }
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* ── Bill list ── */}
+      <div style={{ padding: "0 16px 100px" }}>
+        {loading && <p style={{ textAlign: "center", color: "#888" }}>טוען...</p>}
+
+        {activeBills.map(bill => <BillCard key={bill.id} bill={bill} />)}
+
+        {!loading && activeBills.length === 0 && paidBills.length === 0 && (
+          <div style={{ textAlign: "center", padding: "48px 0", color: "#AAA" }}>
+            <div style={{ fontSize: 52, marginBottom: 12 }}>🤝</div>
+            <p style={{ fontWeight: 600, color: "#888" }}>אין חשבונות עדיין</p>
+            <p style={{ fontSize: 13 }}>לחץ + להוספת חשבון ראשון</p>
+          </div>
+        )}
+
+        {/* Archive */}
+        {paidBills.length > 0 && (
+          <>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, margin: "16px 0 8px" }}>
+              <div style={{ flex: 1, height: 1, background: "#E0E0E0" }} />
+              <span style={{ fontSize: 13, color: "#AAA", whiteSpace: "nowrap" }}>✅ שולמו ({paidBills.length})</span>
+              <div style={{ flex: 1, height: 1, background: "#E0E0E0" }} />
+            </div>
+            {paidBills.map(bill => <BillCard key={bill.id} bill={bill} dimmed />)}
+          </>
+        )}
+      </div>
+
+      {/* ── FAB ── */}
+      <FAB onClick={() => setShowAdd(true)} color={PURPLE} shadow="rgba(123,31,162,0.4)" />
+
+      {/* ── Add form sheet ── */}
+      {showAdd && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 100, display: "flex", alignItems: "flex-end", justifyContent: "center" }} onClick={(e) => { if (e.target === e.currentTarget) setShowAdd(false); }}>
+          <div dir="rtl" style={{ background: "#fff", borderRadius: "24px 24px 0 0", padding: 24, width: "100%", maxWidth: 480, animation: "slideUp 0.3s ease", maxHeight: "90vh", overflowY: "auto" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+              <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>הוספת חשבון</h3>
+              <button onClick={() => setShowAdd(false)} style={{ background: "none", border: "none", fontSize: 22, cursor: "pointer", color: "#999" }}>✕</button>
+            </div>
+
+            {/* Company presets */}
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
+              {COMPANY_PRESETS.map(p => (
+                <button key={p} onClick={() => setCompany(p)} style={{
+                  padding: "6px 14px", borderRadius: 20, border: "none", fontSize: 13, cursor: "pointer", fontFamily: "inherit",
+                  background: company === p ? PURPLE : "#F5F2EF", color: company === p ? "#fff" : "#555",
+                }}>{p}</button>
+              ))}
+            </div>
+
+            <input value={company} onChange={(e) => setCompany(e.target.value)} placeholder="שם חברה / ספק" style={{ ...inputStyle, marginBottom: 12 }} />
+            <input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="סכום (₪)" style={{ ...inputStyle, marginBottom: 12 }} />
+            <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} style={{ ...inputStyle, marginBottom: 12 }} />
+            <input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="הערות (אופציונלי)" style={{ ...inputStyle, marginBottom: 12 }} />
+
+            <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer", marginBottom: 16, padding: "10px 14px", background: "#F5F2EF", borderRadius: 12 }}>
+              <span style={{ fontSize: 20 }}>📎</span>
+              <span style={{ fontSize: 14, color: "#555" }}>{formFile ? formFile.name : "צרף קובץ (אופציונלי)"}</span>
+              <input type="file" accept="image/*,application/pdf" onChange={(e) => setFormFile(e.target.files[0] || null)} style={{ display: "none" }} />
+            </label>
+
+            <button onClick={addBill} disabled={!company.trim() || !amount || !dueDate || uploading} style={{
+              width: "100%", padding: "14px", borderRadius: 14, border: "none",
+              background: company.trim() && amount && dueDate && !uploading ? PURPLE : "#CCC",
+              color: "#fff", fontSize: 16, fontWeight: 600, fontFamily: "inherit",
+              cursor: company.trim() && amount && dueDate && !uploading ? "pointer" : "not-allowed",
+            }}>
+              {uploading ? "שומר..." : "הוסף חשבון ✓"}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── Bill detail sheet ── */}
+      {detailBill && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 100, display: "flex", alignItems: "flex-end", justifyContent: "center" }} onClick={(e) => { if (e.target === e.currentTarget) closeDetail(); }}>
+          <div dir="rtl" style={{ background: "#fff", borderRadius: "24px 24px 0 0", padding: 24, width: "100%", maxWidth: 480, animation: "slideUp 0.3s ease", maxHeight: "90vh", overflowY: "auto" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 }}>
+              <div>
+                <h3 style={{ margin: "0 0 4px", fontSize: 18, fontWeight: 700 }}>{detailBill.company}</h3>
+                <div style={{ fontSize: 13, color: "#888" }}>₪{detailBill.amount} • {fmtDate(detailBill.dueDate)}</div>
+              </div>
+              <button onClick={closeDetail} style={{ background: "none", border: "none", fontSize: 22, cursor: "pointer", color: "#999" }}>✕</button>
+            </div>
+
+            {/* Equal split button */}
+            <button onClick={equalSplitDetail} style={{
+              width: "100%", padding: "10px", borderRadius: 12, border: `1px solid ${PURPLE}`,
+              background: "#fff", color: PURPLE, fontSize: 14, fontWeight: 600, fontFamily: "inherit",
+              cursor: "pointer", marginBottom: 14,
+            }}>
+              ⚖️ חלוקה שווה — ₪{(detailBill.amount / (detailSplits.length || 1)).toFixed(2)} לאדם
+            </button>
+
+            {/* Per-member rows */}
+            {detailSplits.map(split => (
+              <div key={split.uid} style={{
+                display: "flex", alignItems: "center", gap: 10, marginBottom: 10,
+                padding: "12px 14px", borderRadius: 12,
+                background: split.paid ? "#E8F5E9" : "#FFF8E1",
+                border: `1px solid ${split.paid ? "#A5D6A7" : "#FFE082"}`,
+              }}>
+                <div style={{ flex: 1, fontWeight: 600, fontSize: 14, color: "#2D3436" }}>{split.name}</div>
+                <input
+                  type="number"
+                  value={split.amount}
+                  onChange={(e) => updateSplitAmount(split.uid, e.target.value)}
+                  style={{ ...inputStyle, width: 86, padding: "8px 10px", direction: "ltr", textAlign: "right", fontSize: 14 }}
+                />
+                <button onClick={() => togglePaid(split.uid)} style={{
+                  padding: "8px 12px", borderRadius: 10, border: "none", flexShrink: 0,
+                  background: split.paid ? "#43A047" : "#E0E0E0",
+                  color: split.paid ? "#fff" : "#666",
+                  fontSize: 13, fontWeight: 600, fontFamily: "inherit", cursor: "pointer",
+                }}>
+                  {split.paid ? "✓ שולם" : "✗"}
+                </button>
+              </div>
+            ))}
+
+            {/* Validation warning */}
+            {!splitValid && detailSplits.length > 0 && (
+              <div style={{ background: "#FFEBEE", color: "#C62828", borderRadius: 10, padding: "8px 12px", fontSize: 13, marginBottom: 12 }}>
+                סכום השותפים (₪{splitSum.toFixed(2)}) ≠ סכום החשבונית (₪{detailBill.amount})
+              </div>
+            )}
+
+            <div style={{ display: "flex", gap: 10 }}>
+              <button onClick={saveSplits} disabled={!splitValid} style={{
+                flex: 1, padding: "12px", borderRadius: 12, border: "none",
+                background: splitValid ? PURPLE : "#CCC", color: "#fff",
+                fontSize: 15, fontWeight: 600, fontFamily: "inherit",
+                cursor: splitValid ? "pointer" : "not-allowed",
+              }}>שמור</button>
+              <button onClick={shareWhatsApp} style={{
+                padding: "12px 16px", borderRadius: 12, border: "none",
+                background: "#25D366", color: "#fff", fontSize: 15, fontFamily: "inherit", cursor: "pointer",
+              }}>💬</button>
+              <button onClick={() => { setDuplicateTarget(detailBill); setDupDate(""); closeDetail(); }} style={{
+                padding: "12px 16px", borderRadius: 12, border: "none",
+                background: "#F5F2EF", color: "#555", fontSize: 15, fontFamily: "inherit", cursor: "pointer",
+              }}>📋</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Duplicate date picker ── */}
+      {duplicateTarget && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 100, display: "flex", alignItems: "flex-end", justifyContent: "center" }} onClick={(e) => { if (e.target === e.currentTarget) setDuplicateTarget(null); }}>
+          <div dir="rtl" style={{ background: "#fff", borderRadius: "24px 24px 0 0", padding: 24, width: "100%", maxWidth: 480, animation: "slideUp 0.3s ease" }}>
+            <h3 style={{ margin: "0 0 8px", fontSize: 17, fontWeight: 700 }}>📋 שכפל — {duplicateTarget.company}</h3>
+            <p style={{ margin: "0 0 14px", fontSize: 14, color: "#888" }}>בחר תאריך לתשלום עבור החשבון החדש</p>
+            <input type="date" value={dupDate} onChange={(e) => setDupDate(e.target.value)} style={{ ...inputStyle, marginBottom: 16 }} />
+            <div style={{ display: "flex", gap: 10 }}>
+              <button onClick={duplicateBill} disabled={!dupDate} style={{
+                flex: 1, padding: "12px", borderRadius: 12, border: "none",
+                background: dupDate ? PURPLE : "#CCC", color: "#fff",
+                fontSize: 15, fontWeight: 600, fontFamily: "inherit",
+                cursor: dupDate ? "pointer" : "not-allowed",
+              }}>📋 שכפל חשבון</button>
+              <button onClick={() => setDuplicateTarget(null)} style={{
+                padding: "12px 16px", borderRadius: 12, border: "1px solid #DDD",
+                background: "#fff", color: "#888", fontFamily: "inherit", cursor: "pointer",
+              }}>✕</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Edit sheet ── */}
+      {editBill && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 100, display: "flex", alignItems: "flex-end", justifyContent: "center" }} onClick={(e) => { if (e.target === e.currentTarget) setEditBill(null); }}>
+          <div dir="rtl" style={{ background: "#fff", borderRadius: "24px 24px 0 0", padding: 24, width: "100%", maxWidth: 480, animation: "slideUp 0.3s ease" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+              <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>עריכת חשבון</h3>
+              <button onClick={() => setEditBill(null)} style={{ background: "none", border: "none", fontSize: 22, cursor: "pointer", color: "#999" }}>✕</button>
+            </div>
+            <input value={editCompany} onChange={(e) => setEditCompany(e.target.value)} placeholder="שם חברה" style={{ ...inputStyle, marginBottom: 12 }} />
+            <input type="number" value={editAmount} onChange={(e) => setEditAmount(e.target.value)} placeholder="סכום (₪)" style={{ ...inputStyle, marginBottom: 12 }} />
+            <input type="date" value={editDueDate} onChange={(e) => setEditDueDate(e.target.value)} style={{ ...inputStyle, marginBottom: 12 }} />
+            <input value={editNotes} onChange={(e) => setEditNotes(e.target.value)} placeholder="הערות" style={{ ...inputStyle, marginBottom: 16 }} />
+            <div style={{ display: "flex", gap: 10 }}>
+              <button onClick={saveEdit} disabled={!editCompany.trim()} style={{
+                flex: 1, padding: "12px", borderRadius: 12, border: "none",
+                background: editCompany.trim() ? PURPLE : "#CCC", color: "#fff",
+                fontSize: 15, fontWeight: 600, fontFamily: "inherit",
+                cursor: editCompany.trim() ? "pointer" : "not-allowed",
+              }}>שמור ✓</button>
+              <button onClick={() => setEditBill(null)} style={{
+                padding: "12px 16px", borderRadius: 12, border: "1px solid #DDD",
+                background: "#fff", color: "#888", fontFamily: "inherit", cursor: "pointer",
+              }}>✕</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Toast ── */}
+      {toast && (
+        <div style={{ position: "fixed", bottom: 100, left: "50%", transform: "translateX(-50%)", background: "#323232", color: "#fff", borderRadius: 12, padding: "12px 20px", fontSize: 14, zIndex: 200, display: "flex", alignItems: "center", gap: 12, boxShadow: "0 4px 16px rgba(0,0,0,0.25)", whiteSpace: "nowrap" }}>
+          <span>{toast.msg}</span>
+          {toast.undo && <button onClick={toast.undo} style={{ background: "none", border: "none", color: "#81D4FA", fontWeight: 700, fontSize: 14, cursor: "pointer", fontFamily: "inherit" }}>בטל</button>}
+        </div>
+      )}
+
+      <GlobalStyles />
+    </div>
+  );
+}
+
 // ─── Root ─────────────────────────────────────────────────────────────────────
 
 async function migrateExistingData(householdId) {
@@ -3667,6 +4230,7 @@ export default function GroceryApp() {
   const [inviteCode,         setInviteCode]         = useState("");
   const [inviteCodeExpiry,   setInviteCodeExpiry]   = useState("");
   const [memberNames,        setMemberNames]        = useState({});
+  const [enabledModules,     setEnabledModules]     = useState([]);
 
   // ── Persistent list of all households this user belongs to ──
   const [households, setHouseholds] = useState(() => {
@@ -3726,6 +4290,17 @@ export default function GroceryApp() {
       console.error("Failed to rotate invite code:", e);
       alert("שגיאה ברענון הקוד. נסה שוב.");
     }
+  };
+
+  // ── Toggle an optional module on/off for this household ──
+  const toggleModule = async (moduleId, enable) => {
+    if (!householdId) return;
+    const updated = enable
+      ? [...enabledModules.filter(id => id !== moduleId), moduleId]
+      : enabledModules.filter(id => id !== moduleId);
+    try {
+      await updateDoc(doc(db, "households", householdId), { enabledModules: updated });
+    } catch (e) { console.error("Failed to toggle module:", e); }
   };
 
   // ── Select an existing household from the picker ──
@@ -3938,6 +4513,7 @@ export default function GroceryApp() {
         setInviteCode(data.inviteCode || "");
         setInviteCodeExpiry(data.inviteCodeExpiry || "");
         setMemberNames(data.memberNames || {});
+        setEnabledModules(data.enabledModules || []);
       },
       (err) => console.error("household listener error:", err)
     );
@@ -3995,6 +4571,7 @@ export default function GroceryApp() {
   if (screen === "personal_docs")  return <PersonalDocsScreen   userName={userName} householdId={householdId} onBack={() => setScreen("home")} />;
   if (screen === "service_providers") return <ServiceProvidersScreen userName={userName} householdId={householdId} onBack={() => setScreen("home")} />;
   if (screen === "bills")             return <BillsScreen             userName={userName} householdId={householdId} onBack={() => setScreen("home")} />;
+  if (screen === "split_bills")       return <SplitBillsScreen        userName={userName} householdId={householdId} memberNames={memberNames} currentUid={auth.currentUser?.uid || ""} onBack={() => setScreen("home")} />;
   return (
     <HomeScreen
       userName={userName}
@@ -4007,6 +4584,8 @@ export default function GroceryApp() {
       householdId={householdId}
       memberNames={memberNames}
       currentUid={auth.currentUser?.uid || ""}
+      enabledModules={enabledModules}
+      onToggleModule={toggleModule}
     />
   );
 }
