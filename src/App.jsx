@@ -3814,7 +3814,10 @@ function SplitBillsScreen({ userName, householdId, memberNames, currentUid, onBa
   const paidBills   = sortedBills.filter(b => getBillStatus(b) === "paid");
 
   const getBorderColor = (status) =>
-    status === "overdue" ? "#E53935" : status === "soon" ? "#F9A825" : status === "paid" ? "#B0BEC5" : "#43A047";
+    status === "overdue" ? "#E53935" : status === "soon" ? "#F9A825" : status === "paid" ? "#66BB6A" : "#43A047";
+
+  const getCardBg = (status) =>
+    status === "overdue" ? "#FFF8F8" : status === "soon" ? "#FFFDF0" : status === "paid" ? "#F1F8E9" : "#fff";
 
   // ── Equal split helper ──
   const makeEqualSplits = (totalAmt, members) => {
@@ -3957,32 +3960,41 @@ function SplitBillsScreen({ userName, householdId, memberNames, currentUid, onBa
   const fmtDate = (d) => { if (!d) return ""; const [y,m,day]=d.split("-"); return `${day}/${m}/${y}`; };
 
   // ─── Render ───────────────────────────────────────────────────────────────
-  const BillCard = ({ bill, dimmed }) => {
+  const BillCard = ({ bill }) => {
     const status     = getBillStatus(bill);
+    const isPaid     = status === "paid";
     const paidCount  = (bill.splits || []).filter(s => s.paid).length;
     const totalCount = (bill.splits || []).length;
     const border     = getBorderColor(status);
+    const bg         = getCardBg(status);
     return (
       <SwipeItem key={bill.id} onSwipeLeft={() => deleteBill(bill)} onSwipeRight={() => openEdit(bill)}>
         <div
           onClick={() => openDetail(bill)}
           style={{
-            background: "#fff", borderRadius: 16, padding: "14px 16px", marginBottom: 10,
-            boxShadow: "0 2px 8px rgba(0,0,0,0.06)",
+            background: bg, borderRadius: 16, padding: "14px 16px", marginBottom: 10,
+            boxShadow: "0 2px 8px rgba(0,0,0,0.05)",
             borderRight: `4px solid ${border}`,
-            opacity: dimmed ? 0.65 : 1, cursor: "pointer",
+            cursor: "pointer",
           }}
         >
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
             <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 16, fontWeight: 600, color: "#2D3436" }}>{bill.company}</div>
+              <div style={{ fontSize: 16, fontWeight: 600, color: isPaid ? "#555" : "#2D3436", display: "flex", alignItems: "center", gap: 6 }}>
+                {isPaid && <span style={{ fontSize: 14 }}>✅</span>}
+                {bill.company}
+              </div>
               <div style={{ fontSize: 13, color: "#888", marginTop: 2 }}>
-                {bill.dueDate ? `עד ${fmtDate(bill.dueDate)}` : ""}
+                {bill.dueDate ? (isPaid ? `שולם • ${fmtDate(bill.dueDate)}` : `עד ${fmtDate(bill.dueDate)}`) : ""}
                 {status === "overdue" && <span style={{ color: "#E53935", fontWeight: 600, marginRight: 6 }}>⚠️ באיחור</span>}
               </div>
-              <div style={{ fontSize: 12, color: "#AAA", marginTop: 4 }}>{paidCount}/{totalCount} שילמו</div>
+              {totalCount > 0 && (
+                <div style={{ fontSize: 12, color: isPaid ? "#66BB6A" : "#AAA", marginTop: 4, fontWeight: isPaid ? 600 : 400 }}>
+                  {isPaid ? "כולם שילמו ✓" : `${paidCount}/${totalCount} שילמו`}
+                </div>
+              )}
             </div>
-            <div style={{ fontSize: 18, fontWeight: 700, color: dimmed ? "#888" : PURPLE }}>₪{bill.amount}</div>
+            <div style={{ fontSize: 18, fontWeight: 700, color: isPaid ? "#66BB6A" : PURPLE }}>₪{bill.amount}</div>
           </div>
         </div>
       </SwipeItem>
@@ -4047,7 +4059,7 @@ function SplitBillsScreen({ userName, householdId, memberNames, currentUid, onBa
               <span style={{ fontSize: 13, color: "#AAA", whiteSpace: "nowrap" }}>✅ שולמו ({paidBills.length})</span>
               <div style={{ flex: 1, height: 1, background: "#E0E0E0" }} />
             </div>
-            {paidBills.map(bill => <BillCard key={bill.id} bill={bill} dimmed />)}
+            {paidBills.map(bill => <BillCard key={bill.id} bill={bill} />)}
           </>
         )}
       </div>
