@@ -153,6 +153,12 @@ service cloud.firestore {
         allow create: if isMember(hid) && isString(request.resource.data.provider, 200);
         allow update, delete: if isMember(hid);
       }
+
+      match /splitBills/{billId} {
+        allow read:   if isMember(hid);
+        allow create: if isMember(hid) && isString(request.resource.data.company, 200);
+        allow update, delete: if isMember(hid);
+      }
     }
 
     // Deny everything else (legacy root-level collections, etc.)
