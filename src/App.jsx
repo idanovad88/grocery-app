@@ -3765,12 +3765,14 @@ function SplitBillsScreen({ userName, householdId, memberNames, currentUid, onBa
   useEffect(() => {
     if (!householdId) return;
     setLoading(true);
-    const q = query(
-      collection(db, "households", householdId, "splitBills"),
-      orderBy("createdAt", "desc")
-    );
+    const q = collection(db, "households", householdId, "splitBills");
     const unsub = onSnapshot(q,
-      (snap) => { setBills(snap.docs.map(d => ({ id: d.id, ...d.data() }))); setLoading(false); },
+      (snap) => {
+        const docs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        docs.sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
+        setBills(docs);
+        setLoading(false);
+      },
       (err)  => { console.error(err); setLoading(false); }
     );
     return () => unsub();
