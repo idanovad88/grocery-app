@@ -3814,10 +3814,7 @@ function SplitBillsScreen({ userName, householdId, memberNames, currentUid, onBa
   const paidBills   = sortedBills.filter(b => getBillStatus(b) === "paid");
 
   const getBorderColor = (status) =>
-    status === "overdue" ? "#E53935" : status === "soon" ? "#F9A825" : status === "paid" ? "#66BB6A" : "#43A047";
-
-  const getCardBg = (status) =>
-    status === "overdue" ? "#FFF8F8" : status === "soon" ? "#FFFDF0" : status === "paid" ? "#F1F8E9" : "#fff";
+    status === "overdue" ? "#E53935" : status === "soon" ? "#F9A825" : status === "paid" ? "#BDBDBD" : "#43A047";
 
   // ── Equal split helper ──
   const makeEqualSplits = (totalAmt, members) => {
@@ -3970,10 +3967,10 @@ function SplitBillsScreen({ userName, householdId, memberNames, currentUid, onBa
         <div
           onClick={() => openDetail(bill)}
           style={{
-            background: isPaid ? "#F7F7F7" : getCardBg(status),
+            background: isPaid ? "#F7F7F7" : "#fff",
             borderRadius: 16, padding: "14px 16px", marginBottom: 10,
             boxShadow: "0 2px 8px rgba(0,0,0,0.05)",
-            borderRight: `4px solid ${isPaid ? "#BDBDBD" : getBorderColor(status)}`,
+            borderRight: `4px solid ${getBorderColor(status)}`,
             cursor: "pointer",
           }}
         >
