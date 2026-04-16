@@ -69,7 +69,7 @@ const MODULES = [
 ];
 
 // ─── Invite-code expiry ───────────────────────────────────────────────────────
-const INVITE_EXPIRY_DAYS = 7;
+const INVITE_EXPIRY_DAYS = 1;
 const expiryFromNow = () =>
   new Date(Date.now() + INVITE_EXPIRY_DAYS * 24 * 60 * 60 * 1000).toISOString();
 const isInviteExpired = (iso) => {
@@ -942,7 +942,7 @@ function HomeScreen({ userName, householdName, inviteCode, inviteCodeExpiry, onR
               <button
                 onClick={onRotateInvite}
                 style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, background: "#fff", border: "1px solid #DDD", borderRadius: 12, padding: "10px", fontSize: 14, fontWeight: 600, color: "#555", fontFamily: "inherit", cursor: "pointer", marginBottom: 16 }}>
-                <span style={{ fontSize: 16 }}>🔄</span> רענן קוד (תוקף ל-{INVITE_EXPIRY_DAYS} ימים)
+                <span style={{ fontSize: 16 }}>🔄</span> רענן קוד (תוקף ליום)
               </button>
               <div style={{ display: "flex", gap: 12 }}>
                 <button
@@ -4592,8 +4592,30 @@ export default function GroceryApp() {
       (snap) => {
         if (!snap.exists()) return;
         const data = snap.data();
-        setInviteCode(data.inviteCode || "");
-        setInviteCodeExpiry(data.inviteCodeExpiry || "");
+        // Auto-rotate the invite code if it has expired OR if it was generated
+        // with a longer expiry than INVITE_EXPIRY_DAYS (e.g. old 7-day codes).
+        // The first member to open the app each day triggers the update for
+        // the whole household via the real-time listener.
+        const codeNeedsRotation = (iso) => {
+          if (!iso || isInviteExpired(iso)) return true;
+          // Rotate if the remaining time exceeds our daily window (+ 5 min grace)
+          const maxAllowed = Date.now() + INVITE_EXPIRY_DAYS * 24 * 60 * 60 * 1000 + 5 * 60 * 1000;
+          return Date.parse(iso) > maxAllowed;
+        };
+        if (codeNeedsRotation(data.inviteCodeExpiry)) {
+          const newCode   = generateCode();
+          const newExpiry = expiryFromNow();
+          updateDoc(doc(db, "households", snap.id), {
+            inviteCode:       newCode,
+            inviteCodeExpiry: newExpiry,
+          }).catch((e) => console.error("Failed to auto-rotate invite code:", e));
+          // Optimistically update local state; the listener will confirm
+          setInviteCode(newCode);
+          setInviteCodeExpiry(newExpiry);
+        } else {
+          setInviteCode(data.inviteCode || "");
+          setInviteCodeExpiry(data.inviteCodeExpiry || "");
+        }
         setMemberNames(data.memberNames || {});
         setEnabledModules(data.enabledModules || []);
       },
