@@ -3965,36 +3965,35 @@ function SplitBillsScreen({ userName, householdId, memberNames, currentUid, onBa
     const isPaid     = status === "paid";
     const paidCount  = (bill.splits || []).filter(s => s.paid).length;
     const totalCount = (bill.splits || []).length;
-    const border     = getBorderColor(status);
-    const bg         = getCardBg(status);
     return (
       <SwipeItem key={bill.id} onSwipeLeft={() => deleteBill(bill)} onSwipeRight={() => openEdit(bill)}>
         <div
           onClick={() => openDetail(bill)}
           style={{
-            background: bg, borderRadius: 16, padding: "14px 16px", marginBottom: 10,
+            background: isPaid ? "#F7F7F7" : getCardBg(status),
+            borderRadius: 16, padding: "14px 16px", marginBottom: 10,
             boxShadow: "0 2px 8px rgba(0,0,0,0.05)",
-            borderRight: `4px solid ${border}`,
+            borderRight: `4px solid ${isPaid ? "#BDBDBD" : getBorderColor(status)}`,
             cursor: "pointer",
           }}
         >
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
             <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 16, fontWeight: 600, color: isPaid ? "#555" : "#2D3436", display: "flex", alignItems: "center", gap: 6 }}>
+              <div style={{ fontSize: 16, fontWeight: isPaid ? 400 : 600, color: isPaid ? "#888" : "#2D3436", display: "flex", alignItems: "center", gap: 6 }}>
                 {isPaid && <span style={{ fontSize: 14 }}>✅</span>}
                 {bill.company}
               </div>
-              <div style={{ fontSize: 13, color: "#888", marginTop: 2 }}>
+              <div style={{ fontSize: 13, color: "#AAA", marginTop: 2 }}>
                 {bill.dueDate ? (isPaid ? `שולם • ${fmtDate(bill.dueDate)}` : `עד ${fmtDate(bill.dueDate)}`) : ""}
                 {status === "overdue" && <span style={{ color: "#E53935", fontWeight: 600, marginRight: 6 }}>⚠️ באיחור</span>}
               </div>
               {totalCount > 0 && (
-                <div style={{ fontSize: 12, color: isPaid ? "#66BB6A" : "#AAA", marginTop: 4, fontWeight: isPaid ? 600 : 400 }}>
+                <div style={{ fontSize: 12, marginTop: 4, color: isPaid ? "#BDBDBD" : "#AAA" }}>
                   {isPaid ? "כולם שילמו ✓" : `${paidCount}/${totalCount} שילמו`}
                 </div>
               )}
             </div>
-            <div style={{ fontSize: 18, fontWeight: 700, color: isPaid ? "#66BB6A" : PURPLE }}>₪{bill.amount}</div>
+            <div style={{ fontSize: 18, fontWeight: 700, color: isPaid ? "#BDBDBD" : PURPLE }}>₪{bill.amount}</div>
           </div>
         </div>
       </SwipeItem>
