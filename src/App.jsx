@@ -519,9 +519,17 @@ function HouseholdPickerScreen({ userName, households, onSelect, onAddHousehold,
   ];
 
   const [pendingDelete, setPendingDelete] = useState(null);
+  const [confirmDelete, setConfirmDelete] = useState(null); // { id, name }
 
   const handleDelete = (id, name) => {
+    setConfirmDelete({ id, name });
+  };
+
+  const confirmAndDelete = () => {
+    if (!confirmDelete) return;
     if (pendingDelete) clearTimeout(pendingDelete.timerId);
+    const { id, name } = confirmDelete;
+    setConfirmDelete(null);
     const timerId = setTimeout(() => { onDelete(id); setPendingDelete(null); }, 4500);
     setPendingDelete({ id, name, timerId });
   };
@@ -602,6 +610,35 @@ function HouseholdPickerScreen({ userName, households, onSelect, onAddHousehold,
           </div>
         </button>
       </div>
+
+      {/* Confirm Delete Modal */}
+      {confirmDelete && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }} onClick={(e) => { if (e.target === e.currentTarget) setConfirmDelete(null); }}>
+          <div dir="rtl" style={{ background: "#fff", borderRadius: 24, padding: 28, width: "100%", maxWidth: 380, boxShadow: "0 16px 48px rgba(0,0,0,0.2)", animation: "slideUp 0.25s ease" }}>
+            <div style={{ fontSize: 40, textAlign: "center", marginBottom: 12 }}>🗑️</div>
+            <h3 style={{ margin: "0 0 10px", fontSize: 18, fontWeight: 700, color: "#2D3436", textAlign: "center" }}>מחיקת בית</h3>
+            <p style={{ margin: "0 0 6px", fontSize: 14, color: "#636E72", textAlign: "center", lineHeight: 1.6 }}>
+              האם אתה בטוח שברצונך למחוק את הבית
+            </p>
+            <p style={{ margin: "0 0 24px", fontSize: 16, fontWeight: 700, color: "#E53935", textAlign: "center" }}>
+              "{confirmDelete.name}"?
+            </p>
+            <p style={{ margin: "0 0 24px", fontSize: 12, color: "#AAA", textAlign: "center", lineHeight: 1.5 }}>
+              פעולה זו תמחק את כל הנתונים של הבית ולא ניתן לשחזרם.
+            </p>
+            <div style={{ display: "flex", gap: 10 }}>
+              <button onClick={() => setConfirmDelete(null)}
+                style={{ flex: 1, border: "2px solid #E8E5E0", background: "#fff", color: "#636E72", borderRadius: 14, padding: "13px", fontSize: 15, fontWeight: 600, fontFamily: "inherit", cursor: "pointer" }}>
+                ביטול
+              </button>
+              <button onClick={confirmAndDelete}
+                style={{ flex: 1, border: "none", background: "linear-gradient(135deg, #E53935, #B71C1C)", color: "#fff", borderRadius: 14, padding: "13px", fontSize: 15, fontWeight: 600, fontFamily: "inherit", cursor: "pointer" }}>
+                מחק לצמיתות
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Undo Delete Toast */}
       {pendingDelete && (
