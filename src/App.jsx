@@ -3963,12 +3963,13 @@ function SplitBillsScreen({ userName, householdId, memberNames, currentUid, onBa
     const paidCount  = (bill.splits || []).filter(s => s.paid).length;
     const totalCount = (bill.splits || []).length;
     return (
-      <SwipeItem key={bill.id} onSwipeLeft={() => deleteBill(bill)} onSwipeRight={() => openEdit(bill)}>
+      <div style={{ marginBottom: 10 }}>
+      <SwipeItem onSwipeLeft={() => deleteBill(bill)} onSwipeRight={() => openEdit(bill)}>
         <div
           onClick={() => openDetail(bill)}
           style={{
             background: isPaid ? "#F7F7F7" : "#fff",
-            borderRadius: 16, padding: "14px 16px", marginBottom: 10,
+            borderRadius: 16, padding: "14px 16px",
             boxShadow: "0 2px 8px rgba(0,0,0,0.05)",
             borderRight: `4px solid ${getBorderColor(status)}`,
             cursor: "pointer",
@@ -3994,6 +3995,7 @@ function SplitBillsScreen({ userName, householdId, memberNames, currentUid, onBa
           </div>
         </div>
       </SwipeItem>
+      </div>
     );
   };
 
