@@ -3744,6 +3744,7 @@ function SplitBillsScreen({ userName, householdId, memberNames, currentUid, onBa
   const [dupDate,    setDupDate]    = useState("");
   const [toast,      setToast]      = useState(null);
   const [uploading,  setUploading]  = useState(false);
+  const [addError,   setAddError]   = useState("");
 
   // Add-form state
   const [company,  setCompany]  = useState("");
@@ -3828,6 +3829,7 @@ function SplitBillsScreen({ userName, householdId, memberNames, currentUid, onBa
   const addBill = async () => {
     if (!company.trim() || !amount || !dueDate) return;
     setUploading(true);
+    setAddError("");
     try {
       let fileUrl = "", filePath = "", fileType = "";
       if (formFile) {
@@ -3844,8 +3846,12 @@ function SplitBillsScreen({ userName, householdId, memberNames, currentUid, onBa
         splits: makeEqualSplits(amount, memberNames),
       });
       setCompany(""); setAmount(""); setDueDate(""); setNotes(""); setFormFile(null);
+      setAddError("");
       setShowAdd(false);
-    } catch (e) { console.error(e); }
+    } catch (e) {
+      console.error(e);
+      setAddError(e?.code === "permission-denied" ? "אין הרשאה — פרוס את כללי Firestore ושנה בשוב" : `שגיאה: ${e?.message || e?.code || "נסה שוב"}`);
+    }
     setUploading(false);
   };
 
@@ -4068,6 +4074,7 @@ function SplitBillsScreen({ userName, householdId, memberNames, currentUid, onBa
 
             <input value={company} onChange={(e) => setCompany(e.target.value)} placeholder="שם חברה / ספק" style={{ ...inputStyle, marginBottom: 12 }} />
             <input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="סכום (₪)" style={{ ...inputStyle, marginBottom: 12 }} />
+            <label style={{ display: "block", fontSize: 13, color: "#888", marginBottom: 6, fontWeight: 500 }}>תאריך תשלום</label>
             <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} style={{ ...inputStyle, marginBottom: 12 }} />
             <input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="הערות (אופציונלי)" style={{ ...inputStyle, marginBottom: 12 }} />
 
@@ -4076,6 +4083,12 @@ function SplitBillsScreen({ userName, householdId, memberNames, currentUid, onBa
               <span style={{ fontSize: 14, color: "#555" }}>{formFile ? formFile.name : "צרף קובץ (אופציונלי)"}</span>
               <input type="file" accept="image/*,application/pdf" onChange={(e) => setFormFile(e.target.files[0] || null)} style={{ display: "none" }} />
             </label>
+
+            {addError && (
+              <div style={{ background: "#FFEBEE", color: "#C62828", borderRadius: 10, padding: "10px 14px", fontSize: 13, marginBottom: 12 }}>
+                ⚠️ {addError}
+              </div>
+            )}
 
             <button onClick={addBill} disabled={!company.trim() || !amount || !dueDate || uploading} style={{
               width: "100%", padding: "14px", borderRadius: 14, border: "none",
