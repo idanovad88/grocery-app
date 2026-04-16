@@ -520,9 +520,17 @@ function HouseholdPickerScreen({ userName, households, onSelect, onAddHousehold,
 
   const [pendingDelete, setPendingDelete] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(null); // { id, name }
+  const [swipeResetKeys, setSwipeResetKeys] = useState({});
 
   const handleDelete = (id, name) => {
     setConfirmDelete({ id, name });
+  };
+
+  const cancelDelete = () => {
+    if (confirmDelete) {
+      setSwipeResetKeys(prev => ({ ...prev, [confirmDelete.id]: (prev[confirmDelete.id] || 0) + 1 }));
+    }
+    setConfirmDelete(null);
   };
 
   const confirmAndDelete = () => {
@@ -573,7 +581,7 @@ function HouseholdPickerScreen({ userName, households, onSelect, onAddHousehold,
           const col = HOUSE_COLORS[i % HOUSE_COLORS.length];
           return (
             <div key={h.id} style={{ marginBottom: 12 }}>
-              <SwipeItem onSwipeLeft={() => handleDelete(h.id, h.name)} borderRadius={20}>
+              <SwipeItem key={`${h.id}-${swipeResetKeys[h.id] || 0}`} onSwipeLeft={() => handleDelete(h.id, h.name)} borderRadius={20}>
                 <div
                   onClick={() => onSelect(h.id, h.name)}
                   style={{
@@ -613,7 +621,7 @@ function HouseholdPickerScreen({ userName, households, onSelect, onAddHousehold,
 
       {/* Confirm Delete Modal */}
       {confirmDelete && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }} onClick={(e) => { if (e.target === e.currentTarget) setConfirmDelete(null); }}>
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }} onClick={(e) => { if (e.target === e.currentTarget) cancelDelete(); }}>
           <div dir="rtl" style={{ background: "#fff", borderRadius: 24, padding: 28, width: "100%", maxWidth: 380, boxShadow: "0 16px 48px rgba(0,0,0,0.2)", animation: "slideUp 0.25s ease" }}>
             <div style={{ fontSize: 40, textAlign: "center", marginBottom: 12 }}>🗑️</div>
             <h3 style={{ margin: "0 0 10px", fontSize: 18, fontWeight: 700, color: "#2D3436", textAlign: "center" }}>מחיקת בית</h3>
@@ -627,7 +635,7 @@ function HouseholdPickerScreen({ userName, households, onSelect, onAddHousehold,
               פעולה זו תמחק את כל הנתונים של הבית ולא ניתן לשחזרם.
             </p>
             <div style={{ display: "flex", gap: 10 }}>
-              <button onClick={() => setConfirmDelete(null)}
+              <button onClick={cancelDelete}
                 style={{ flex: 1, border: "2px solid #E8E5E0", background: "#fff", color: "#636E72", borderRadius: 14, padding: "13px", fontSize: 15, fontWeight: 600, fontFamily: "inherit", cursor: "pointer" }}>
                 ביטול
               </button>
