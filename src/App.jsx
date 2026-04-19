@@ -2487,28 +2487,33 @@ function PersonalDocsScreen({ userName, householdId, onBack }) {
 const BDAY_PINK  = "#E91E63";
 const BDAY_DARK  = "#C2185B";
 
+function parseDateParts(dateStr) {
+  const [year, month, day] = dateStr.split("-").map(Number);
+  return { year, month: month - 1, day };
+}
+
 function getDaysUntilBirthday(dateStr) {
   if (!dateStr) return Infinity;
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  const bday  = new Date(dateStr);
-  const next  = new Date(today.getFullYear(), bday.getMonth(), bday.getDate());
+  const { month, day } = parseDateParts(dateStr);
+  const next = new Date(today.getFullYear(), month, day);
   if (next < today) next.setFullYear(today.getFullYear() + 1);
   return Math.round((next - today) / 86400000);
 }
 
 function formatBirthdayDate(dateStr) {
   if (!dateStr) return "";
-  const d = new Date(dateStr);
-  return `${d.getDate()}/${d.getMonth() + 1}`;
+  const { month, day } = parseDateParts(dateStr);
+  return `${day}/${month + 1}`;
 }
 
 function getAge(dateStr) {
   if (!dateStr) return null;
   const today = new Date();
-  const bday  = new Date(dateStr);
-  let age = today.getFullYear() - bday.getFullYear();
-  const hasBirthdayPassed = today.getMonth() > bday.getMonth() || (today.getMonth() === bday.getMonth() && today.getDate() >= bday.getDate());
+  const { year, month, day } = parseDateParts(dateStr);
+  let age = today.getFullYear() - year;
+  const hasBirthdayPassed = today.getMonth() > month || (today.getMonth() === month && today.getDate() >= day);
   if (!hasBirthdayPassed) age--;
   return age + 1; // age they'll turn on next birthday
 }
