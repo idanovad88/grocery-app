@@ -2490,6 +2490,7 @@ const BDAY_DARK  = "#C2185B";
 function getDaysUntilBirthday(dateStr) {
   if (!dateStr) return Infinity;
   const today = new Date();
+  today.setHours(0, 0, 0, 0);
   const bday  = new Date(dateStr);
   const next  = new Date(today.getFullYear(), bday.getMonth(), bday.getDate());
   if (next < today) next.setFullYear(today.getFullYear() + 1);
