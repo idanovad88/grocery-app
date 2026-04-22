@@ -3766,8 +3766,9 @@ function SplitBillsScreen({ userName, householdId, memberNames, currentUid, onBa
   const [editNotes,   setEditNotes]   = useState("");
 
   // Payer tracking
-  const [paidBy,       setPaidBy]       = useState(currentUid || "");
-  const [detailPaidBy, setDetailPaidBy] = useState("");
+  const [paidBy,           setPaidBy]           = useState(currentUid || "");
+  const [detailPaidBy,     setDetailPaidBy]     = useState("");
+  const [selectedMembers,  setSelectedMembers]  = useState(() => new Set(Object.keys(memberNames)));
 
   const COMPANY_PRESETS = ["חשמל", "מים", "גז", "ועד בית", "ארנונה", "אינטרנט", "שכירות"];
 
@@ -3871,7 +3872,10 @@ function SplitBillsScreen({ userName, householdId, memberNames, currentUid, onBa
         fileType = formFile.type;
       }
       const nowIso = new Date().toISOString();
-      const splits = makeEqualSplits(amount, memberNames).map(s => ({
+      const filteredMembers = Object.fromEntries(
+        Object.entries(memberNames).filter(([uid]) => selectedMembers.has(uid))
+      );
+      const splits = makeEqualSplits(amount, filteredMembers).map(s => ({
         ...s,
         paid: s.uid === paidBy,
         paidAt: s.uid === paidBy ? nowIso : null,
@@ -3885,6 +3889,7 @@ function SplitBillsScreen({ userName, householdId, memberNames, currentUid, onBa
       });
       setCompany(""); setAmount(""); setDueDate(""); setNotes(""); setFormFile(null);
       setPaidBy(currentUid || "");
+      setSelectedMembers(new Set(Object.keys(memberNames)));
       setAddError("");
       setShowAdd(false);
     } catch (e) {
@@ -4050,7 +4055,7 @@ function SplitBillsScreen({ userName, householdId, memberNames, currentUid, onBa
               )}
               {bill.paidBy && memberNames[bill.paidBy] && (
                 <div style={{ fontSize: 12, marginTop: 2, color: isPaid ? "#BDBDBD" : "#9C27B0", fontWeight: 500 }}>
-                  💳 שילם: {memberNames[bill.paidBy]}
+                  💳 משלם: {memberNames[bill.paidBy]}
                 </div>
               )}
             </div>
@@ -4159,11 +4164,41 @@ function SplitBillsScreen({ userName, householdId, memberNames, currentUid, onBa
             <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} style={{ ...inputStyle, marginBottom: 12 }} />
             <input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="הערות (אופציונלי)" style={{ ...inputStyle, marginBottom: 12 }} />
 
-            {/* Who paid? */}
-            <div style={{ marginBottom: 16 }}>
-              <div style={{ fontSize: 13, color: "#888", fontWeight: 500, marginBottom: 8 }}>מי שילם את החשבון?</div>
+            {/* Member selection */}
+            <div style={{ marginBottom: 14 }}>
+              <div style={{ fontSize: 13, color: "#888", fontWeight: 500, marginBottom: 8 }}>מי משתתף בחשבון?</div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                {Object.entries(memberNames).map(([uid, name]) => (
+                {Object.entries(memberNames).map(([uid, name]) => {
+                  const selected = selectedMembers.has(uid);
+                  return (
+                    <button key={uid} onClick={() => {
+                      setSelectedMembers(prev => {
+                        const next = new Set(prev);
+                        if (next.has(uid)) {
+                          if (next.size <= 1) return prev; // keep at least 1
+                          next.delete(uid);
+                          if (paidBy === uid) setPaidBy([...next][0] || "");
+                        } else {
+                          next.add(uid);
+                        }
+                        return next;
+                      });
+                    }} style={{
+                      padding: "8px 16px", borderRadius: 20, border: "none", fontSize: 13,
+                      cursor: "pointer", fontFamily: "inherit", fontWeight: selected ? 600 : 400,
+                      background: selected ? "#E8F5E9" : "#F5F2EF",
+                      color: selected ? "#2E7D32" : "#AAA",
+                    }}>{selected ? `✓ ${name}` : name}</button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Who fronts the payment? */}
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ fontSize: 13, color: "#888", fontWeight: 500, marginBottom: 8 }}>מי משלם מהכיס?</div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                {Object.entries(memberNames).filter(([uid]) => selectedMembers.has(uid)).map(([uid, name]) => (
                   <button key={uid} onClick={() => setPaidBy(uid)} style={{
                     padding: "8px 16px", borderRadius: 20, border: "none", fontSize: 13,
                     cursor: "pointer", fontFamily: "inherit", fontWeight: paidBy === uid ? 700 : 400,
@@ -4213,7 +4248,7 @@ function SplitBillsScreen({ userName, householdId, memberNames, currentUid, onBa
             {/* Who paid — editable in detail */}
             {detailSplits.length > 0 && (
               <div style={{ marginBottom: 14 }}>
-                <div style={{ fontSize: 12, color: "#888", fontWeight: 500, marginBottom: 6 }}>מי שילם?</div>
+                <div style={{ fontSize: 12, color: "#888", fontWeight: 500, marginBottom: 6 }}>מי משלם מהכיס?</div>
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
                   {detailSplits.map(s => (
                     <button key={s.uid} onClick={() => changeDetailPayer(s.uid)} style={{
@@ -4248,7 +4283,7 @@ function SplitBillsScreen({ userName, householdId, memberNames, currentUid, onBa
               }}>
                 <div style={{ flex: 1 }}>
                   <div style={{ fontWeight: 600, fontSize: 14, color: "#2D3436" }}>{split.name}</div>
-                  {isPayer && <div style={{ fontSize: 11, color: "#7B1FA2", fontWeight: 500 }}>שילם את החשבון</div>}
+                  {isPayer && <div style={{ fontSize: 11, color: "#7B1FA2", fontWeight: 500 }}>משלם מהכיס</div>}
                 </div>
                 <input
                   type="number"
