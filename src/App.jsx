@@ -3760,10 +3760,12 @@ function SplitBillsScreen({ userName, householdId, memberNames, currentUid, onBa
   const [formFile, setFormFile] = useState(null);
 
   // Edit-form state
-  const [editCompany, setEditCompany] = useState("");
-  const [editAmount,  setEditAmount]  = useState("");
-  const [editDueDate, setEditDueDate] = useState("");
-  const [editNotes,   setEditNotes]   = useState("");
+  const [editCompany,         setEditCompany]         = useState("");
+  const [editAmount,          setEditAmount]          = useState("");
+  const [editDueDate,         setEditDueDate]         = useState("");
+  const [editNotes,           setEditNotes]           = useState("");
+  const [editPaidBy,          setEditPaidBy]          = useState("");
+  const [editSelectedMembers, setEditSelectedMembers] = useState(new Set());
 
   // Payer tracking
   const [paidBy,           setPaidBy]           = useState(currentUid || "");
@@ -3875,11 +3877,7 @@ function SplitBillsScreen({ userName, householdId, memberNames, currentUid, onBa
       const filteredMembers = Object.fromEntries(
         Object.entries(memberNames).filter(([uid]) => selectedMembers.has(uid))
       );
-      const splits = makeEqualSplits(amount, filteredMembers).map(s => ({
-        ...s,
-        paid: s.uid === paidBy,
-        paidAt: s.uid === paidBy ? nowIso : null,
-      }));
+      const splits = makeEqualSplits(amount, filteredMembers);
       await addDoc(collection(db, "households", householdId, "splitBills"), {
         company: company.trim(), amount: parseFloat(amount) || 0, dueDate,
         notes: notes.trim(), fileUrl, filePath, fileType,
@@ -3919,14 +3917,27 @@ function SplitBillsScreen({ userName, householdId, memberNames, currentUid, onBa
     setEditAmount(String(bill.amount || ""));
     setEditDueDate(bill.dueDate || "");
     setEditNotes(bill.notes || "");
+    setEditPaidBy(bill.paidBy || "");
+    setEditSelectedMembers(new Set((bill.splits || []).map(s => s.uid)));
   };
 
   const saveEdit = async () => {
     if (!editBill) return;
     try {
+      const newAmount = parseFloat(editAmount) || 0;
+      const filteredMemberMap = Object.fromEntries(
+        [...editSelectedMembers].map(uid => [uid, memberNames[uid] || ""])
+      );
+      const existingSplits = editBill.splits || [];
+      const newSplits = makeEqualSplits(newAmount, filteredMemberMap).map(s => {
+        const existing = existingSplits.find(e => e.uid === s.uid);
+        return existing ? { ...s, paid: existing.paid, paidAt: existing.paidAt } : s;
+      });
       await updateDoc(doc(db, "households", householdId, "splitBills", editBill.id), {
-        company: editCompany.trim(), amount: parseFloat(editAmount) || 0,
+        company: editCompany.trim(), amount: newAmount,
         dueDate: editDueDate, notes: editNotes.trim(),
+        paidBy: editPaidBy || null,
+        splits: newSplits,
       });
       setEditBill(null);
     } catch (e) { console.error(e); }
@@ -3944,7 +3955,6 @@ function SplitBillsScreen({ userName, householdId, memberNames, currentUid, onBa
     setDetailSplits(prev => prev.map(s => s.uid === uid ? { ...s, amount: parseFloat(val) || 0 } : s));
 
   const togglePaid = (uid) => {
-    if (uid === detailPaidBy) return; // payer is always settled
     setDetailSplits(prev => prev.map(s => {
       if (s.uid !== uid) return s;
       const nowPaid = !s.paid;
@@ -3953,13 +3963,7 @@ function SplitBillsScreen({ userName, householdId, memberNames, currentUid, onBa
   };
 
   const changeDetailPayer = (newPayerUid) => {
-    const oldPayer = detailPaidBy;
     setDetailPaidBy(newPayerUid);
-    setDetailSplits(prev => prev.map(s => {
-      if (s.uid === newPayerUid) return { ...s, paid: true, paidAt: s.paidAt || new Date().toISOString() };
-      if (s.uid === oldPayer) return { ...s, paid: false, paidAt: null };
-      return s;
-    }));
   };
 
   const equalSplitDetail = () => {
@@ -4291,21 +4295,16 @@ function SplitBillsScreen({ userName, householdId, memberNames, currentUid, onBa
                   onChange={(e) => updateSplitAmount(split.uid, e.target.value)}
                   style={{ ...inputStyle, width: 86, padding: "8px 10px", direction: "ltr", textAlign: "right", fontSize: 14 }}
                 />
-                {isPayer ? (
-                  <div style={{
-                    padding: "8px 12px", borderRadius: 10, flexShrink: 0,
-                    background: "#7B1FA2", color: "#fff", fontSize: 13, fontWeight: 600,
-                  }}>💳 שילם</div>
-                ) : (
-                  <button onClick={() => togglePaid(split.uid)} style={{
-                    padding: "8px 12px", borderRadius: 10, border: "none", flexShrink: 0,
-                    background: split.paid ? "#43A047" : "#E0E0E0",
-                    color: split.paid ? "#fff" : "#666",
-                    fontSize: 13, fontWeight: 600, fontFamily: "inherit", cursor: "pointer",
-                  }}>
-                    {split.paid ? "✓ החזיר" : "חייב"}
-                  </button>
-                )}
+                <button onClick={() => togglePaid(split.uid)} style={{
+                  padding: "8px 12px", borderRadius: 10, border: "none", flexShrink: 0,
+                  background: split.paid ? (isPayer ? "#7B1FA2" : "#43A047") : "#E0E0E0",
+                  color: split.paid ? "#fff" : "#666",
+                  fontSize: 13, fontWeight: 600, fontFamily: "inherit", cursor: "pointer",
+                }}>
+                  {isPayer
+                    ? (split.paid ? "✓ שילם" : "טרם שילם")
+                    : (split.paid ? "✓ החזיר" : "חייב")}
+                </button>
                 <button
                   onClick={() => setDetailSplits(prev => prev.filter(s => s.uid !== split.uid))}
                   title="הסר מהחשבון"
@@ -4368,7 +4367,7 @@ function SplitBillsScreen({ userName, householdId, memberNames, currentUid, onBa
       {/* ── Edit sheet ── */}
       {editBill && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 100, display: "flex", alignItems: "flex-end", justifyContent: "center" }} onClick={(e) => { if (e.target === e.currentTarget) setEditBill(null); }}>
-          <div dir="rtl" style={{ background: "#fff", borderRadius: "24px 24px 0 0", padding: 24, width: "100%", maxWidth: 480, animation: "slideUp 0.3s ease" }}>
+          <div dir="rtl" style={{ background: "#fff", borderRadius: "24px 24px 0 0", padding: 24, width: "100%", maxWidth: 480, animation: "slideUp 0.3s ease", maxHeight: "90vh", overflowY: "auto" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
               <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>עריכת חשבון</h3>
               <button onClick={() => setEditBill(null)} style={{ background: "none", border: "none", fontSize: 22, cursor: "pointer", color: "#999" }}>✕</button>
@@ -4376,7 +4375,53 @@ function SplitBillsScreen({ userName, householdId, memberNames, currentUid, onBa
             <input value={editCompany} onChange={(e) => setEditCompany(e.target.value)} placeholder="שם חברה" style={{ ...inputStyle, marginBottom: 12 }} />
             <input type="number" value={editAmount} onChange={(e) => setEditAmount(e.target.value)} placeholder="סכום (₪)" style={{ ...inputStyle, marginBottom: 12 }} />
             <input type="date" value={editDueDate} onChange={(e) => setEditDueDate(e.target.value)} style={{ ...inputStyle, marginBottom: 12 }} />
-            <input value={editNotes} onChange={(e) => setEditNotes(e.target.value)} placeholder="הערות" style={{ ...inputStyle, marginBottom: 16 }} />
+            <input value={editNotes} onChange={(e) => setEditNotes(e.target.value)} placeholder="הערות" style={{ ...inputStyle, marginBottom: 14 }} />
+
+            {/* Member selection */}
+            <div style={{ marginBottom: 14 }}>
+              <div style={{ fontSize: 13, color: "#888", fontWeight: 500, marginBottom: 8 }}>מי משתתף בחשבון?</div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                {Object.entries(memberNames).map(([uid, name]) => {
+                  const selected = editSelectedMembers.has(uid);
+                  return (
+                    <button key={uid} onClick={() => {
+                      setEditSelectedMembers(prev => {
+                        const next = new Set(prev);
+                        if (next.has(uid)) {
+                          if (next.size <= 1) return prev;
+                          next.delete(uid);
+                          if (editPaidBy === uid) setEditPaidBy([...next][0] || "");
+                        } else {
+                          next.add(uid);
+                        }
+                        return next;
+                      });
+                    }} style={{
+                      padding: "8px 16px", borderRadius: 20, border: "none", fontSize: 13,
+                      cursor: "pointer", fontFamily: "inherit", fontWeight: selected ? 600 : 400,
+                      background: selected ? "#E8F5E9" : "#F5F2EF",
+                      color: selected ? "#2E7D32" : "#AAA",
+                    }}>{selected ? `✓ ${name}` : name}</button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Who fronts the payment? */}
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ fontSize: 13, color: "#888", fontWeight: 500, marginBottom: 8 }}>מי משלם מהכיס?</div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                {Object.entries(memberNames).filter(([uid]) => editSelectedMembers.has(uid)).map(([uid, name]) => (
+                  <button key={uid} onClick={() => setEditPaidBy(uid)} style={{
+                    padding: "8px 16px", borderRadius: 20, border: "none", fontSize: 13,
+                    cursor: "pointer", fontFamily: "inherit", fontWeight: editPaidBy === uid ? 700 : 400,
+                    background: editPaidBy === uid ? PURPLE : "#F5F2EF",
+                    color: editPaidBy === uid ? "#fff" : "#555",
+                  }}>{editPaidBy === uid ? `✓ ${name}` : name}</button>
+                ))}
+              </div>
+            </div>
+
             <div style={{ display: "flex", gap: 10 }}>
               <button onClick={saveEdit} disabled={!editCompany.trim()} style={{
                 flex: 1, padding: "12px", borderRadius: 12, border: "none",
