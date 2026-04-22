@@ -3765,6 +3765,10 @@ function SplitBillsScreen({ userName, householdId, memberNames, currentUid, onBa
   const [editDueDate, setEditDueDate] = useState("");
   const [editNotes,   setEditNotes]   = useState("");
 
+  // Payer tracking
+  const [paidBy,       setPaidBy]       = useState(currentUid || "");
+  const [detailPaidBy, setDetailPaidBy] = useState("");
+
   const COMPANY_PRESETS = ["חשמל", "מים", "גז", "ועד בית", "ארנונה", "אינטרנט", "שכירות"];
 
   // ── Load bills ──
@@ -3784,15 +3788,34 @@ function SplitBillsScreen({ userName, householdId, memberNames, currentUid, onBa
     return () => unsub();
   }, [householdId]);
 
-  // ── Balance per member (sum of unpaid split amounts across all bills) ──
-  const balances = useMemo(() => {
-    const bal = {};
+  // ── Directed net debts: who owes whom after netting mutual debts ──
+  const netDebts = useMemo(() => {
+    const debts = {}; // debts[debtor][creditor] = amount
     for (const bill of bills) {
+      const payerUid = bill.paidBy;
+      if (!payerUid) continue;
       for (const split of (bill.splits || [])) {
-        if (!split.paid) bal[split.uid] = (bal[split.uid] || 0) + (split.amount || 0);
+        if (split.uid === payerUid || split.paid) continue;
+        if (!debts[split.uid]) debts[split.uid] = {};
+        debts[split.uid][payerUid] = (debts[split.uid][payerUid] || 0) + (split.amount || 0);
       }
     }
-    return bal;
+    const result = [];
+    const seen = new Set();
+    for (const debtor of Object.keys(debts)) {
+      for (const creditor of Object.keys(debts[debtor])) {
+        const key = [debtor, creditor].sort().join("|");
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const net = (debts[debtor]?.[creditor] || 0) - (debts[creditor]?.[debtor] || 0);
+        if (Math.abs(net) > 0.01) {
+          result.push(net > 0
+            ? { from: debtor, to: creditor, amount: net }
+            : { from: creditor, to: debtor, amount: -net });
+        }
+      }
+    }
+    return result; // [{ from: uid, to: uid, amount }]
   }, [bills]);
 
   // ── Urgency helpers ──
@@ -3847,13 +3870,21 @@ function SplitBillsScreen({ userName, householdId, memberNames, currentUid, onBa
         fileUrl  = await getDownloadURL(sRef);
         fileType = formFile.type;
       }
+      const nowIso = new Date().toISOString();
+      const splits = makeEqualSplits(amount, memberNames).map(s => ({
+        ...s,
+        paid: s.uid === paidBy,
+        paidAt: s.uid === paidBy ? nowIso : null,
+      }));
       await addDoc(collection(db, "households", householdId, "splitBills"), {
         company: company.trim(), amount: parseFloat(amount) || 0, dueDate,
         notes: notes.trim(), fileUrl, filePath, fileType,
-        addedBy: userName, createdAt: new Date().toISOString(),
-        splits: makeEqualSplits(amount, memberNames),
+        addedBy: userName, createdAt: nowIso,
+        paidBy: paidBy || null,
+        splits,
       });
       setCompany(""); setAmount(""); setDueDate(""); setNotes(""); setFormFile(null);
+      setPaidBy(currentUid || "");
       setAddError("");
       setShowAdd(false);
     } catch (e) {
@@ -3900,18 +3931,31 @@ function SplitBillsScreen({ userName, householdId, memberNames, currentUid, onBa
   const openDetail = (bill) => {
     setDetailBill(bill);
     setDetailSplits((bill.splits || []).map(s => ({ ...s })));
+    setDetailPaidBy(bill.paidBy || "");
   };
-  const closeDetail = () => { setDetailBill(null); setDetailSplits([]); };
+  const closeDetail = () => { setDetailBill(null); setDetailSplits([]); setDetailPaidBy(""); };
 
   const updateSplitAmount = (uid, val) =>
     setDetailSplits(prev => prev.map(s => s.uid === uid ? { ...s, amount: parseFloat(val) || 0 } : s));
 
-  const togglePaid = (uid) =>
+  const togglePaid = (uid) => {
+    if (uid === detailPaidBy) return; // payer is always settled
     setDetailSplits(prev => prev.map(s => {
       if (s.uid !== uid) return s;
       const nowPaid = !s.paid;
       return { ...s, paid: nowPaid, paidAt: nowPaid ? new Date().toISOString() : null };
     }));
+  };
+
+  const changeDetailPayer = (newPayerUid) => {
+    const oldPayer = detailPaidBy;
+    setDetailPaidBy(newPayerUid);
+    setDetailSplits(prev => prev.map(s => {
+      if (s.uid === newPayerUid) return { ...s, paid: true, paidAt: s.paidAt || new Date().toISOString() };
+      if (s.uid === oldPayer) return { ...s, paid: false, paidAt: null };
+      return s;
+    }));
+  };
 
   const equalSplitDetail = () => {
     if (!detailBill) return;
@@ -3926,7 +3970,10 @@ function SplitBillsScreen({ userName, householdId, memberNames, currentUid, onBa
   const saveSplits = async () => {
     if (!detailBill || !splitValid) return;
     try {
-      await updateDoc(doc(db, "households", householdId, "splitBills", detailBill.id), { splits: detailSplits });
+      await updateDoc(doc(db, "households", householdId, "splitBills", detailBill.id), {
+        splits: detailSplits,
+        paidBy: detailPaidBy || null,
+      });
       closeDetail();
     } catch (e) { console.error(e); }
   };
@@ -3938,12 +3985,17 @@ function SplitBillsScreen({ userName, householdId, memberNames, currentUid, onBa
   const shareWhatsApp = () => {
     if (!detailBill) return;
     const fmt = (d) => { if (!d) return ""; const [y,m,day]=d.split("-"); return `${day}/${m}/${y}`; };
+    const payerName = detailPaidBy ? memberNames[detailPaidBy] || "" : "";
     const text = [
       `חשבון: ${detailBill.company} — ₪${detailBill.amount}`,
       `תאריך לתשלום: ${fmt(detailBill.dueDate)}`,
+      payerName ? `שילם: ${payerName}` : "",
       "",
-      ...detailSplits.map(s => `${s.name}: ₪${s.amount} ${s.paid ? "✓ שולם" : "✗ לא שולם"}`),
-    ].join("\n");
+      ...detailSplits.map(s => {
+        const isPayer = s.uid === detailPaidBy;
+        return `${s.name}: ₪${s.amount} ${isPayer ? "💳 שילם" : s.paid ? "✓ החזיר" : "✗ חייב"}`;
+      }),
+    ].filter(l => l !== "").join("\n");
     window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, "_blank");
   };
 
@@ -3993,7 +4045,12 @@ function SplitBillsScreen({ userName, householdId, memberNames, currentUid, onBa
               </div>
               {totalCount > 0 && (
                 <div style={{ fontSize: 12, marginTop: 4, color: isPaid ? "#BDBDBD" : "#AAA" }}>
-                  {isPaid ? "כולם שילמו ✓" : `${paidCount}/${totalCount} שילמו`}
+                  {isPaid ? "הכל סולק ✓" : `${paidCount}/${totalCount} סילקו`}
+                </div>
+              )}
+              {bill.paidBy && memberNames[bill.paidBy] && (
+                <div style={{ fontSize: 12, marginTop: 2, color: isPaid ? "#BDBDBD" : "#9C27B0", fontWeight: 500 }}>
+                  💳 שילם: {memberNames[bill.paidBy]}
                 </div>
               )}
             </div>
@@ -4017,28 +4074,34 @@ function SplitBillsScreen({ userName, householdId, memberNames, currentUid, onBa
           </div>
         </div>
 
-        {/* Balance row */}
-        {Object.keys(memberNames).length > 0 && (
-          <div style={{ marginTop: 16, display: "flex", gap: 10, overflowX: "auto", paddingBottom: 4 }}>
-            {Object.entries(memberNames).map(([uid, name]) => {
-              const bal    = balances[uid] || 0;
-              const isPaid = bal === 0;
-              return (
-                <div key={uid} style={{
-                  flexShrink: 0, borderRadius: 12, padding: "8px 14px", minWidth: 90, textAlign: "center",
-                  background: isPaid ? "rgba(67,160,71,0.25)" : "rgba(229,57,53,0.25)",
-                  border: `1px solid ${isPaid ? "rgba(67,160,71,0.5)" : "rgba(229,57,53,0.5)"}`,
+        {/* Net debt summary */}
+        <div style={{ marginTop: 16 }}>
+          {netDebts.length === 0 ? (
+            <div style={{
+              borderRadius: 12, padding: "10px 16px", textAlign: "center",
+              background: "rgba(67,160,71,0.25)", border: "1px solid rgba(67,160,71,0.5)",
+            }}>
+              <div style={{ fontSize: 13, color: "#fff", fontWeight: 600 }}>✓ הכל מסולק</div>
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {netDebts.map((d, i) => (
+                <div key={i} style={{
+                  borderRadius: 12, padding: "10px 16px",
+                  background: "rgba(229,57,53,0.2)", border: "1px solid rgba(229,57,53,0.4)",
+                  display: "flex", justifyContent: "space-between", alignItems: "center",
                 }}>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: "#fff" }}>{name}</div>
-                  {isPaid
-                    ? <div style={{ fontSize: 12, color: "rgba(255,255,255,0.8)" }}>✓ מעודכן</div>
-                    : <div style={{ fontSize: 12, color: "rgba(255,255,255,0.9)", fontWeight: 700 }}>₪{bal.toFixed(0)} לתשלום</div>
-                  }
+                  <div style={{ fontSize: 13, color: "#fff" }}>
+                    <span style={{ fontWeight: 700 }}>{memberNames[d.from] || d.from}</span>
+                    <span style={{ opacity: 0.8 }}> חייב ל-</span>
+                    <span style={{ fontWeight: 700 }}>{memberNames[d.to] || d.to}</span>
+                  </div>
+                  <div style={{ fontSize: 15, fontWeight: 800, color: "#fff" }}>₪{d.amount.toFixed(0)}</div>
                 </div>
-              );
-            })}
-          </div>
-        )}
+              ))}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* ── Bill list ── */}
@@ -4096,6 +4159,21 @@ function SplitBillsScreen({ userName, householdId, memberNames, currentUid, onBa
             <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} style={{ ...inputStyle, marginBottom: 12 }} />
             <input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="הערות (אופציונלי)" style={{ ...inputStyle, marginBottom: 12 }} />
 
+            {/* Who paid? */}
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ fontSize: 13, color: "#888", fontWeight: 500, marginBottom: 8 }}>מי שילם את החשבון?</div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                {Object.entries(memberNames).map(([uid, name]) => (
+                  <button key={uid} onClick={() => setPaidBy(uid)} style={{
+                    padding: "8px 16px", borderRadius: 20, border: "none", fontSize: 13,
+                    cursor: "pointer", fontFamily: "inherit", fontWeight: paidBy === uid ? 700 : 400,
+                    background: paidBy === uid ? PURPLE : "#F5F2EF",
+                    color: paidBy === uid ? "#fff" : "#555",
+                  }}>{paidBy === uid ? `✓ ${name}` : name}</button>
+                ))}
+              </div>
+            </div>
+
             <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer", marginBottom: 16, padding: "10px 14px", background: "#F5F2EF", borderRadius: 12 }}>
               <span style={{ fontSize: 20 }}>📎</span>
               <span style={{ fontSize: 14, color: "#555" }}>{formFile ? formFile.name : "צרף קובץ (אופציונלי)"}</span>
@@ -4132,6 +4210,23 @@ function SplitBillsScreen({ userName, householdId, memberNames, currentUid, onBa
               <button onClick={closeDetail} style={{ background: "none", border: "none", fontSize: 22, cursor: "pointer", color: "#999" }}>✕</button>
             </div>
 
+            {/* Who paid — editable in detail */}
+            {detailSplits.length > 0 && (
+              <div style={{ marginBottom: 14 }}>
+                <div style={{ fontSize: 12, color: "#888", fontWeight: 500, marginBottom: 6 }}>מי שילם?</div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                  {detailSplits.map(s => (
+                    <button key={s.uid} onClick={() => changeDetailPayer(s.uid)} style={{
+                      padding: "6px 14px", borderRadius: 20, border: "none", fontSize: 13,
+                      cursor: "pointer", fontFamily: "inherit", fontWeight: detailPaidBy === s.uid ? 700 : 400,
+                      background: detailPaidBy === s.uid ? PURPLE : "#F5F2EF",
+                      color: detailPaidBy === s.uid ? "#fff" : "#555",
+                    }}>{detailPaidBy === s.uid ? `✓ ${s.name}` : s.name}</button>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* Equal split button */}
             <button onClick={equalSplitDetail} style={{
               width: "100%", padding: "10px", borderRadius: 12, border: `1px solid ${PURPLE}`,
@@ -4142,35 +4237,48 @@ function SplitBillsScreen({ userName, householdId, memberNames, currentUid, onBa
             </button>
 
             {/* Per-member rows */}
-            {detailSplits.map(split => (
+            {detailSplits.map(split => {
+              const isPayer = split.uid === detailPaidBy;
+              return (
               <div key={split.uid} style={{
                 display: "flex", alignItems: "center", gap: 10, marginBottom: 10,
                 padding: "12px 14px", borderRadius: 12,
-                background: split.paid ? "#E8F5E9" : "#FFF8E1",
-                border: `1px solid ${split.paid ? "#A5D6A7" : "#FFE082"}`,
+                background: isPayer ? "#EDE7F6" : split.paid ? "#E8F5E9" : "#FFF8E1",
+                border: `1px solid ${isPayer ? "#B39DDB" : split.paid ? "#A5D6A7" : "#FFE082"}`,
               }}>
-                <div style={{ flex: 1, fontWeight: 600, fontSize: 14, color: "#2D3436" }}>{split.name}</div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 600, fontSize: 14, color: "#2D3436" }}>{split.name}</div>
+                  {isPayer && <div style={{ fontSize: 11, color: "#7B1FA2", fontWeight: 500 }}>שילם את החשבון</div>}
+                </div>
                 <input
                   type="number"
                   value={split.amount}
                   onChange={(e) => updateSplitAmount(split.uid, e.target.value)}
                   style={{ ...inputStyle, width: 86, padding: "8px 10px", direction: "ltr", textAlign: "right", fontSize: 14 }}
                 />
-                <button onClick={() => togglePaid(split.uid)} style={{
-                  padding: "8px 12px", borderRadius: 10, border: "none", flexShrink: 0,
-                  background: split.paid ? "#43A047" : "#E0E0E0",
-                  color: split.paid ? "#fff" : "#666",
-                  fontSize: 13, fontWeight: 600, fontFamily: "inherit", cursor: "pointer",
-                }}>
-                  {split.paid ? "✓ שולם" : "✗"}
-                </button>
+                {isPayer ? (
+                  <div style={{
+                    padding: "8px 12px", borderRadius: 10, flexShrink: 0,
+                    background: "#7B1FA2", color: "#fff", fontSize: 13, fontWeight: 600,
+                  }}>💳 שילם</div>
+                ) : (
+                  <button onClick={() => togglePaid(split.uid)} style={{
+                    padding: "8px 12px", borderRadius: 10, border: "none", flexShrink: 0,
+                    background: split.paid ? "#43A047" : "#E0E0E0",
+                    color: split.paid ? "#fff" : "#666",
+                    fontSize: 13, fontWeight: 600, fontFamily: "inherit", cursor: "pointer",
+                  }}>
+                    {split.paid ? "✓ החזיר" : "חייב"}
+                  </button>
+                )}
                 <button
                   onClick={() => setDetailSplits(prev => prev.filter(s => s.uid !== split.uid))}
                   title="הסר מהחשבון"
                   style={{ padding: "8px 10px", borderRadius: 10, border: "none", flexShrink: 0, background: "#FFEBEE", color: "#E53935", fontSize: 14, fontFamily: "inherit", cursor: "pointer" }}
                 >✕</button>
               </div>
-            ))}
+              );
+            })}
 
             {/* Validation warning */}
             {!splitValid && detailSplits.length > 0 && (
