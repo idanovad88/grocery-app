@@ -3768,7 +3768,7 @@ function SplitBillsScreen({ userName, householdId, memberNames, currentUid, onBa
   const [editSelectedMembers, setEditSelectedMembers] = useState(new Set());
 
   // Payer tracking
-  const [paidBy,           setPaidBy]           = useState(currentUid || "");
+  const [paidBy,           setPaidBy]           = useState("");
   const [detailPaidBy,     setDetailPaidBy]     = useState("");
   const [selectedMembers,  setSelectedMembers]  = useState(() => new Set(Object.keys(memberNames)));
 
@@ -3963,7 +3963,7 @@ function SplitBillsScreen({ userName, householdId, memberNames, currentUid, onBa
   };
 
   const changeDetailPayer = (newPayerUid) => {
-    setDetailPaidBy(newPayerUid);
+    setDetailPaidBy(prev => prev === newPayerUid ? "" : newPayerUid);
   };
 
   const equalSplitDetail = () => {
@@ -4203,7 +4203,7 @@ function SplitBillsScreen({ userName, householdId, memberNames, currentUid, onBa
               <div style={{ fontSize: 13, color: "#888", fontWeight: 500, marginBottom: 8 }}>מי משלם מהכיס?</div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
                 {Object.entries(memberNames).filter(([uid]) => selectedMembers.has(uid)).map(([uid, name]) => (
-                  <button key={uid} onClick={() => setPaidBy(uid)} style={{
+                  <button key={uid} onClick={() => setPaidBy(prev => prev === uid ? "" : uid)} style={{
                     padding: "8px 16px", borderRadius: 20, border: "none", fontSize: 13,
                     cursor: "pointer", fontFamily: "inherit", fontWeight: paidBy === uid ? 700 : 400,
                     background: paidBy === uid ? PURPLE : "#F5F2EF",
@@ -4282,12 +4282,11 @@ function SplitBillsScreen({ userName, householdId, memberNames, currentUid, onBa
               <div key={split.uid} style={{
                 display: "flex", alignItems: "center", gap: 10, marginBottom: 10,
                 padding: "12px 14px", borderRadius: 12,
-                background: isPayer ? "#EDE7F6" : split.paid ? "#E8F5E9" : "#FFF8E1",
-                border: `1px solid ${isPayer ? "#B39DDB" : split.paid ? "#A5D6A7" : "#FFE082"}`,
+                background: split.paid ? "#E8F5E9" : "#FFF8E1",
+                border: `1px solid ${split.paid ? "#A5D6A7" : "#FFE082"}`,
               }}>
                 <div style={{ flex: 1 }}>
                   <div style={{ fontWeight: 600, fontSize: 14, color: "#2D3436" }}>{split.name}</div>
-                  {isPayer && <div style={{ fontSize: 11, color: "#7B1FA2", fontWeight: 500 }}>משלם מהכיס</div>}
                 </div>
                 <input
                   type="number"
@@ -4297,7 +4296,7 @@ function SplitBillsScreen({ userName, householdId, memberNames, currentUid, onBa
                 />
                 <button onClick={() => togglePaid(split.uid)} style={{
                   padding: "8px 12px", borderRadius: 10, border: "none", flexShrink: 0,
-                  background: split.paid ? (isPayer ? "#7B1FA2" : "#43A047") : "#E0E0E0",
+                  background: split.paid ? "#43A047" : "#E0E0E0",
                   color: split.paid ? "#fff" : "#666",
                   fontSize: 13, fontWeight: 600, fontFamily: "inherit", cursor: "pointer",
                 }}>
