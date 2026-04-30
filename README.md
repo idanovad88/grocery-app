@@ -1,16 +1,30 @@
-# React + Vite
+# Grocery App
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+A household grocery and home-management PWA built with React + Vite, backed by Firebase (Auth, Firestore, Storage, Cloud Functions) and deployed on Vercel.
 
-Currently, two official plugins are available:
+## Stack
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+- **Frontend**: React 19, Vite
+- **Backend**: Firebase (Firestore real-time DB, Auth, Storage, Cloud Functions)
+- **Hosting**: Vercel (auto-deploys from `main`)
 
-## React Compiler
+## Navigation
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+The app uses state-based navigation (`useState`) rather than a router. All screens live in `src/App.jsx` and are rendered conditionally based on a `screen` string.
 
-## Expanding the ESLint configuration
+### Android back button (PWA)
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+To prevent Chrome from closing the standalone PWA when the user presses the Android back button, the app integrates the browser History API:
+
+- On mount, two sentinel entries are pushed so the user starts at history position ≥ 2. Chrome only exits the PWA when navigation would go below position 0 (the initial app URL); by keeping the user at position 1+, the PWA stays open.
+- `navigateTo(screen)` wraps `pushState` + `setScreen` for forward navigation.
+- A `popstate` listener syncs React state and re-anchors the history stack whenever the back button is pressed.
+- In-app back buttons call `window.history.back()` so both the Android system back and the in-app button share the same code path.
+
+## Development
+
+```bash
+npm install
+npm run dev      # local dev server
+npm run build    # production build
+```
