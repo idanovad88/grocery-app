@@ -1027,7 +1027,8 @@ function ShoppingScreen({ userName, householdId, onBack }) {
       await addDoc(collection(db, "households", householdId, "items"), { name, priority, addedBy: userName, date: new Date().toISOString() });
       if (!history.includes(name)) setHistory((p) => [...p, name]);
     } catch (e) { console.error("Error adding item:", e); }
-    setInputValue(""); setPriority("yellow"); setShowAdd(false); setShowSuggestions(false);
+    setInputValue(""); setPriority("yellow"); setShowSuggestions(false);
+    inputRef.current?.focus();
   };
 
   const removeItem = (id, itemData) => {
