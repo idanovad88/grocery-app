@@ -4482,17 +4482,22 @@ export default function GroceryApp() {
   const goBack = () => window.history.back();
 
   useEffect(() => {
-    // Replace the initial URL entry with a floor marker, then push the real
-    // home entry on top. This gives us a sentinel at the bottom of the stack
-    // so that pressing back on the home screen never exits the PWA.
+    // Chrome PWA exits when the user navigates back to the very first history
+    // entry (position 0 = the initial app URL).  To prevent that, we seed the
+    // stack with TWO floor entries so the user is always at position ≥ 1:
+    //   0: __floor__ (initial navigation – never reached by the user)
+    //   1: __floor__ (guard – this is as far back as back-presses ever go)
+    //   2: home      (starting position for the user)
+    // When back is pressed from position 2 we land on position 1 (guard),
+    // popstate fires, and we immediately push home back to position 2.
+    // Chrome never sees us leave position 1+, so it never closes the PWA.
     window.history.replaceState({ screen: "__floor__" }, "");
+    window.history.pushState({ screen: "__floor__" }, "");
     window.history.pushState({ screen: "home" }, "");
 
     const handlePopState = (e) => {
       const target = e.state?.screen;
       if (!target || target === "__floor__") {
-        // We hit the bottom — stay in the app on the home screen and
-        // re-push a home entry so the next back press hits the floor again.
         setScreen("home");
         window.history.pushState({ screen: "home" }, "");
       } else {
