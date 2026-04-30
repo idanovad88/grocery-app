@@ -4475,6 +4475,39 @@ export default function GroceryApp() {
   const [screen,        setScreen]   = useState("home");
   const [showAddHousehold, setShowAddHousehold] = useState(false);
 
+  const navigateTo = (screenName) => {
+    window.history.pushState({ screen: screenName }, "");
+    setScreen(screenName);
+  };
+  const goBack = () => window.history.back();
+
+  useEffect(() => {
+    // Chrome PWA exits when the user navigates back to the very first history
+    // entry (position 0 = the initial app URL).  To prevent that, we seed the
+    // stack with TWO floor entries so the user is always at position ≥ 1:
+    //   0: __floor__ (initial navigation – never reached by the user)
+    //   1: __floor__ (guard – this is as far back as back-presses ever go)
+    //   2: home      (starting position for the user)
+    // When back is pressed from position 2 we land on position 1 (guard),
+    // popstate fires, and we immediately push home back to position 2.
+    // Chrome never sees us leave position 1+, so it never closes the PWA.
+    window.history.replaceState({ screen: "__floor__" }, "");
+    window.history.pushState({ screen: "__floor__" }, "");
+    window.history.pushState({ screen: "home" }, "");
+
+    const handlePopState = (e) => {
+      const target = e.state?.screen;
+      if (!target || target === "__floor__") {
+        setScreen("home");
+        window.history.pushState({ screen: "home" }, "");
+      } else {
+        setScreen(target);
+      }
+    };
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
+
   // ── Deep-link join: read ?join=CODE from the URL on first render. ──
   // The code is stripped from the URL immediately so it doesn't linger in
   // browser history, share screenshots, or get re-applied on reload.
@@ -4861,15 +4894,15 @@ export default function GroceryApp() {
   }
 
   // Screen 3+: Main app
-  if (screen === "shopping")   return <ShoppingScreen   userName={userName} householdId={householdId} onBack={() => setScreen("home")} />;
-  if (screen === "coupons")    return <CouponsScreen    userName={userName} householdId={householdId} onBack={() => setScreen("home")} />;
-  if (screen === "insurance")  return <InsuranceScreen  userName={userName} householdId={householdId} onBack={() => setScreen("home")} />;
-  if (screen === "birthdays")      return <BirthdaysScreen      userName={userName} householdId={householdId} onBack={() => setScreen("home")} />;
-  if (screen === "subscriptions")  return <SubscriptionsScreen  userName={userName} householdId={householdId} onBack={() => setScreen("home")} />;
-  if (screen === "personal_docs")  return <PersonalDocsScreen   userName={userName} householdId={householdId} onBack={() => setScreen("home")} />;
-  if (screen === "service_providers") return <ServiceProvidersScreen userName={userName} householdId={householdId} onBack={() => setScreen("home")} />;
-  if (screen === "bills")             return <BillsScreen             userName={userName} householdId={householdId} onBack={() => setScreen("home")} />;
-  if (screen === "split_bills")       return <SplitBillsScreen        userName={userName} householdId={householdId} memberNames={memberNames} currentUid={auth.currentUser?.uid || ""} onBack={() => setScreen("home")} />;
+  if (screen === "shopping")   return <ShoppingScreen   userName={userName} householdId={householdId} onBack={goBack} />;
+  if (screen === "coupons")    return <CouponsScreen    userName={userName} householdId={householdId} onBack={goBack} />;
+  if (screen === "insurance")  return <InsuranceScreen  userName={userName} householdId={householdId} onBack={goBack} />;
+  if (screen === "birthdays")      return <BirthdaysScreen      userName={userName} householdId={householdId} onBack={goBack} />;
+  if (screen === "subscriptions")  return <SubscriptionsScreen  userName={userName} householdId={householdId} onBack={goBack} />;
+  if (screen === "personal_docs")  return <PersonalDocsScreen   userName={userName} householdId={householdId} onBack={goBack} />;
+  if (screen === "service_providers") return <ServiceProvidersScreen userName={userName} householdId={householdId} onBack={goBack} />;
+  if (screen === "bills")             return <BillsScreen             userName={userName} householdId={householdId} onBack={goBack} />;
+  if (screen === "split_bills")       return <SplitBillsScreen        userName={userName} householdId={householdId} memberNames={memberNames} currentUid={auth.currentUser?.uid || ""} onBack={goBack} />;
   return (
     <HomeScreen
       userName={userName}
@@ -4877,7 +4910,7 @@ export default function GroceryApp() {
       inviteCode={inviteCode}
       inviteCodeExpiry={inviteCodeExpiry}
       onRotateInvite={rotateInvite}
-      onNavigate={setScreen}
+      onNavigate={navigateTo}
       onSwitchHousehold={switchHousehold}
       householdId={householdId}
       memberNames={memberNames}
