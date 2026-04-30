@@ -4482,8 +4482,23 @@ export default function GroceryApp() {
   const goBack = () => window.history.back();
 
   useEffect(() => {
-    window.history.replaceState({ screen: "home" }, "");
-    const handlePopState = (e) => setScreen(e.state?.screen || "home");
+    // Replace the initial URL entry with a floor marker, then push the real
+    // home entry on top. This gives us a sentinel at the bottom of the stack
+    // so that pressing back on the home screen never exits the PWA.
+    window.history.replaceState({ screen: "__floor__" }, "");
+    window.history.pushState({ screen: "home" }, "");
+
+    const handlePopState = (e) => {
+      const target = e.state?.screen;
+      if (!target || target === "__floor__") {
+        // We hit the bottom — stay in the app on the home screen and
+        // re-push a home entry so the next back press hits the floor again.
+        setScreen("home");
+        window.history.pushState({ screen: "home" }, "");
+      } else {
+        setScreen(target);
+      }
+    };
     window.addEventListener("popstate", handlePopState);
     return () => window.removeEventListener("popstate", handlePopState);
   }, []);
