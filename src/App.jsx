@@ -890,7 +890,7 @@ function HomeScreen({ userName, householdName, inviteCode, inviteCodeExpiry, onR
                     onClick={() => onToggleModule && onToggleModule(mod.id, !isEnabled)}
                     style={{
                       width: 52, height: 28, borderRadius: 14, border: "none", cursor: "pointer",
-                      background: isEnabled ? mod.color : "#DDD",
+                      background: isEnabled ? "#4CAF50" : "#DDD",
                       position: "relative", transition: "background 0.2s", flexShrink: 0,
                     }}
                   >
