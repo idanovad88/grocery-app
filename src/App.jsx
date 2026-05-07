@@ -690,7 +690,7 @@ function HomeScreen({ userName, householdName, inviteCode, inviteCodeExpiry, onR
   const orderedModules = moduleOrder
     .map(id => MODULES.find(m => m.id === id))
     .filter(Boolean)
-    .filter(m => !m.optional || enabledModules.includes(m.id));
+    .filter(m => enabledModules.includes(m.id));
 
   const handleDragStart = (e, index) => {
     e.preventDefault();
@@ -853,31 +853,29 @@ function HomeScreen({ userName, householdName, inviteCode, inviteCodeExpiry, onR
         })}
 
         {/* Manage modules button */}
-        {MODULES.some(m => m.optional) && (
-          <button
-            onClick={() => setShowManageModules(true)}
-            style={{
-              width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
-              background: "#fff", border: "2px dashed #DDD", borderRadius: 20, padding: "16px",
-              fontSize: 14, fontWeight: 600, color: "#888", fontFamily: "inherit", cursor: "pointer",
-              marginTop: 4,
-            }}
-          >
-            ⚙️ נהל מודולים
-          </button>
-        )}
+        <button
+          onClick={() => setShowManageModules(true)}
+          style={{
+            width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+            background: "#fff", border: "2px dashed #DDD", borderRadius: 20, padding: "16px",
+            fontSize: 14, fontWeight: 600, color: "#888", fontFamily: "inherit", cursor: "pointer",
+            marginTop: 4,
+          }}
+        >
+          ⚙️ נהל מודולים
+        </button>
       </div>
 
       {/* Manage modules bottom sheet */}
       {showManageModules && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 100, display: "flex", alignItems: "flex-end", justifyContent: "center" }} onClick={(e) => { if (e.target === e.currentTarget) setShowManageModules(false); }}>
-          <div dir="rtl" style={{ background: "#fff", borderRadius: "24px 24px 0 0", padding: 28, width: "100%", maxWidth: 480, animation: "slideUp 0.3s ease" }}>
+          <div dir="rtl" style={{ background: "#fff", borderRadius: "24px 24px 0 0", padding: 28, width: "100%", maxWidth: 480, animation: "slideUp 0.3s ease", maxHeight: "80vh", overflowY: "auto" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-              <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: "#2D3436" }}>⚙️ מודולים אופציונליים</h3>
+              <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: "#2D3436" }}>⚙️ ניהול מודולים</h3>
               <button onClick={() => setShowManageModules(false)} style={{ background: "none", border: "none", fontSize: 22, cursor: "pointer", color: "#999", lineHeight: 1 }}>✕</button>
             </div>
-            <p style={{ margin: "0 0 20px", fontSize: 13, color: "#888" }}>הפעל מודולים נוספים עבור משק הבית</p>
-            {MODULES.filter(m => m.optional).map(mod => {
+            <p style={{ margin: "0 0 20px", fontSize: 13, color: "#888" }}>בחר אילו מודולים יוצגו במסך הבית</p>
+            {MODULES.map(mod => {
               const isEnabled = enabledModules.includes(mod.id);
               return (
                 <div key={mod.id} style={{ display: "flex", alignItems: "center", gap: 14, padding: "14px 0", borderBottom: "1px solid #F0EDE8" }}>
@@ -4540,7 +4538,7 @@ export default function GroceryApp() {
   const [inviteCode,         setInviteCode]         = useState("");
   const [inviteCodeExpiry,   setInviteCodeExpiry]   = useState("");
   const [memberNames,        setMemberNames]        = useState({});
-  const [enabledModules,     setEnabledModules]     = useState([]);
+  const [enabledModules,     setEnabledModules]     = useState(() => MODULES.map(m => m.id));
 
   // ── Persistent list of all households this user belongs to ──
   const [households, setHouseholds] = useState(() => {
@@ -4845,7 +4843,17 @@ export default function GroceryApp() {
           setInviteCodeExpiry(data.inviteCodeExpiry || "");
         }
         setMemberNames(data.memberNames || {});
-        setEnabledModules(data.enabledModules || []);
+        const savedModules = data.enabledModules;
+        if (!savedModules) {
+          setEnabledModules(MODULES.map(m => m.id));
+        } else {
+          // Migrate old data: if no regular (non-optional) modules are stored,
+          // it means this household only tracked optional modules before.
+          // Add all regular modules so they default to enabled.
+          const regularIds = MODULES.filter(m => !m.optional).map(m => m.id);
+          const hasRegular = regularIds.some(id => savedModules.includes(id));
+          setEnabledModules(hasRegular ? savedModules : [...regularIds, ...savedModules]);
+        }
       },
       (err) => console.error("household listener error:", err)
     );
