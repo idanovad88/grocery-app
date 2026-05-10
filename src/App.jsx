@@ -15,6 +15,7 @@ import {
 } from "firebase/auth";
 import { getStorage, ref, uploadBytes, getDownloadURL, getBlob } from "firebase/storage";
 import { getFunctions, httpsCallable } from "firebase/functions";
+import { getMessaging, getToken, onMessage } from "firebase/messaging";
 
 const firebaseConfig = {
   apiKey: "AIzaSyBRAaqDl5ywLm-wSOmvo-ucPxtVNdWjH7w",
@@ -31,6 +32,9 @@ const db = getFirestore(app);
 const auth = getAuth(app);
 const storage = getStorage(app);
 const functions = getFunctions(app);
+const messaging = getMessaging(app);
+// Replace with the public VAPID key from Firebase Console → Project Settings → Cloud Messaging → Web Push certificates
+const VAPID_KEY = "YOUR_VAPID_PUBLIC_KEY";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -4473,6 +4477,9 @@ export default function GroceryApp() {
   const [signInError,   setSignInError]   = useState("");
   const [screen,        setScreen]   = useState("home");
   const [showAddHousehold, setShowAddHousehold] = useState(false);
+  const [notifAsked,      setNotifAsked]      = useState(() => localStorage.getItem("homio-notif-asked") === "true");
+  const [showNotifPrompt, setShowNotifPrompt] = useState(false);
+  const [notifToast,      setNotifToast]      = useState(null);
 
   const navigateTo = (screenName) => {
     window.history.pushState({ screen: screenName }, "");
@@ -4658,6 +4665,33 @@ export default function GroceryApp() {
     setScreen("home");
   };
 
+  // ── Push notification helpers ──
+  const registerFcmToken = async (uid) => {
+    try {
+      const swReg = await navigator.serviceWorker.ready;
+      const token = await getToken(messaging, { vapidKey: VAPID_KEY, serviceWorkerRegistration: swReg });
+      if (token) {
+        await setDoc(doc(db, "users", uid), { fcmToken: token, updatedAt: new Date().toISOString() }, { merge: true });
+      }
+    } catch (e) {
+      console.error("FCM token registration failed:", e);
+    }
+  };
+
+  const handleNotifAccept = async () => {
+    setShowNotifPrompt(false);
+    localStorage.setItem("homio-notif-asked", "true");
+    setNotifAsked(true);
+    const permission = await Notification.requestPermission();
+    if (permission === "granted") registerFcmToken(authUser.uid);
+  };
+
+  const handleNotifDecline = () => {
+    setShowNotifPrompt(false);
+    localStorage.setItem("homio-notif-asked", "true");
+    setNotifAsked(true);
+  };
+
   // ── Auth state listener ──
   // Only non-anonymous users are considered "signed in" for the app's
   // purposes. When a Google user arrives (on first login, on a new device,
@@ -4714,6 +4748,35 @@ export default function GroceryApp() {
     });
     return () => { clearTimeout(timeout); unsub(); };
   }, []);
+
+  // ── One-time notification permission prompt ──
+  // Shown once after sign-in + household selection. Browser permission state
+  // "granted"/"denied" is also captured so we never prompt when the browser
+  // has already made a decision (e.g. user previously granted in another tab).
+  useEffect(() => {
+    if (!authUser || !householdId || notifAsked) return;
+    if (!("Notification" in window) || !("serviceWorker" in navigator)) return;
+    if (Notification.permission !== "default") {
+      localStorage.setItem("homio-notif-asked", "true");
+      setNotifAsked(true);
+      if (Notification.permission === "granted") registerFcmToken(authUser.uid);
+      return;
+    }
+    setShowNotifPrompt(true);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authUser, householdId, notifAsked]);
+
+  // ── Foreground FCM message handler ──
+  useEffect(() => {
+    if (!authUser) return;
+    const unsub = onMessage(messaging, (payload) => {
+      const title = payload.notification?.title || "Homio";
+      const body  = payload.notification?.body  || "";
+      setNotifToast(`${title} — ${body}`);
+      setTimeout(() => setNotifToast(null), 5000);
+    });
+    return unsub;
+  }, [authUser]);
 
   // ── Google sign-in handler ──
   // 1. If there is a lingering anonymous session, try linkWithPopup first.
@@ -4913,19 +4976,49 @@ export default function GroceryApp() {
   if (screen === "bills")             return <BillsScreen             userName={userName} householdId={householdId} onBack={goBack} />;
   if (screen === "split_bills")       return <SplitBillsScreen        userName={userName} householdId={householdId} memberNames={memberNames} currentUid={auth.currentUser?.uid || ""} onBack={goBack} />;
   return (
-    <HomeScreen
-      userName={userName}
-      householdName={householdName}
-      inviteCode={inviteCode}
-      inviteCodeExpiry={inviteCodeExpiry}
-      onRotateInvite={rotateInvite}
-      onNavigate={navigateTo}
-      onSwitchHousehold={switchHousehold}
-      householdId={householdId}
-      memberNames={memberNames}
-      currentUid={auth.currentUser?.uid || ""}
-      enabledModules={enabledModules}
-      onToggleModule={toggleModule}
-    />
+    <>
+      <HomeScreen
+        userName={userName}
+        householdName={householdName}
+        inviteCode={inviteCode}
+        inviteCodeExpiry={inviteCodeExpiry}
+        onRotateInvite={rotateInvite}
+        onNavigate={navigateTo}
+        onSwitchHousehold={switchHousehold}
+        householdId={householdId}
+        memberNames={memberNames}
+        currentUid={auth.currentUser?.uid || ""}
+        enabledModules={enabledModules}
+        onToggleModule={toggleModule}
+      />
+
+      {/* One-time notification permission prompt */}
+      {showNotifPrompt && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
+          <div dir="rtl" style={{ background: "#fff", borderRadius: 24, padding: 28, width: "100%", maxWidth: 360, boxShadow: "0 16px 48px rgba(0,0,0,0.2)" }}>
+            <div style={{ fontSize: 48, textAlign: "center", marginBottom: 12 }}>🔔</div>
+            <h3 style={{ margin: "0 0 10px", fontSize: 18, fontWeight: 700, color: "#2D3436", textAlign: "center" }}>הפעל התראות</h3>
+            <p style={{ margin: "0 0 24px", fontSize: 14, color: "#636E72", textAlign: "center", lineHeight: 1.6 }}>
+              קבל תזכורות יום לפני ימי הולדת, חשבונות לתשלום וחידוש מנויים
+            </p>
+            <div style={{ display: "flex", gap: 10 }}>
+              <button onClick={handleNotifDecline} style={{ flex: 1, border: "2px solid #E8E5E0", background: "#fff", color: "#636E72", borderRadius: 14, padding: 13, fontSize: 15, fontWeight: 600, fontFamily: "'Rubik', sans-serif", cursor: "pointer" }}>
+                אחר כך
+              </button>
+              <button onClick={handleNotifAccept} style={{ flex: 2, border: "none", background: "linear-gradient(135deg, #2D3436, #636E72)", color: "#fff", borderRadius: 14, padding: 13, fontSize: 15, fontWeight: 600, fontFamily: "'Rubik', sans-serif", cursor: "pointer" }}>
+                הפעל ✓
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Foreground notification toast */}
+      {notifToast && (
+        <div style={{ position: "fixed", bottom: 32, left: "50%", transform: "translateX(-50%)", background: "#2D3436", color: "#fff", borderRadius: 14, padding: "12px 20px", zIndex: 201, boxShadow: "0 6px 24px rgba(0,0,0,0.3)", fontSize: 14, fontFamily: "'Rubik', sans-serif", whiteSpace: "nowrap", maxWidth: "90vw", overflow: "hidden", textOverflow: "ellipsis" }}>
+          {notifToast}
+        </div>
+      )}
+    </>
   );
 }

@@ -1,6 +1,8 @@
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
+const { onSchedule }         = require("firebase-functions/v2/scheduler");
 const { initializeApp }      = require("firebase-admin/app");
 const { getFirestore }       = require("firebase-admin/firestore");
+const { getMessaging }       = require("firebase-admin/messaging");
 const { google }             = require("googleapis");
 const Anthropic              = require("@anthropic-ai/sdk");
 const pdf                    = require("pdf-parse");
@@ -182,5 +184,93 @@ ${text.slice(0, 5000)}`,
     }
 
     return { bills: results };
+  }
+);
+
+exports.sendDailyReminders = onSchedule(
+  { schedule: "0 7 * * *", timeZone: "Asia/Jerusalem", region: "us-central1" },
+  async () => {
+    const db  = getFirestore();
+    const fcm = getMessaging();
+
+    const tomorrow      = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const tomorrowStr   = tomorrow.toISOString().split("T")[0]; // "YYYY-MM-DD"
+    const tomorrowMonth = tomorrow.getMonth() + 1;
+    const tomorrowDay   = tomorrow.getDate();
+
+    const householdsSnap = await db.collection("households").get();
+
+    for (const hhDoc of householdsSnap.docs) {
+      const hid     = hhDoc.id;
+      const members = hhDoc.data().members || [];
+      if (members.length === 0) continue;
+
+      // Collect valid FCM tokens for all household members
+      const tokens = [];
+      for (const uid of members) {
+        const userDoc = await db.collection("users").doc(uid).get();
+        if (userDoc.exists && userDoc.data()?.fcmToken) {
+          tokens.push({ uid, token: userDoc.data().fcmToken });
+        }
+      }
+      if (tokens.length === 0) continue;
+
+      const notifications = [];
+
+      // Birthdays — match month+day regardless of year (annual recurrence)
+      const birthdaysSnap = await db.collection("households").doc(hid).collection("birthdays").get();
+      for (const d of birthdaysSnap.docs) {
+        const { name, date } = d.data();
+        if (!date) continue;
+        const [, m, day] = date.split("-").map(Number);
+        if (m === tomorrowMonth && day === tomorrowDay) {
+          notifications.push({ title: "🎂 יום הולדת מחר!", body: `מחר יום ההולדת של ${name}`, tag: `birthday-${d.id}` });
+        }
+      }
+
+      // Bills — unpaid only, exact date match
+      const billsSnap = await db
+        .collection("households").doc(hid).collection("bills")
+        .where("paid", "==", false).get();
+      for (const d of billsSnap.docs) {
+        const { provider, amount, dueDate } = d.data();
+        if (dueDate === tomorrowStr) {
+          notifications.push({ title: "💰 חשבון לתשלום מחר!", body: `${provider}${amount ? ` — ${amount}₪` : ""}`, tag: `bill-${d.id}` });
+        }
+      }
+
+      // Subscriptions — exact date match
+      const subsSnap = await db.collection("households").doc(hid).collection("subscriptions").get();
+      for (const d of subsSnap.docs) {
+        const { name, renewalDate } = d.data();
+        if (renewalDate === tomorrowStr) {
+          notifications.push({ title: "📺 מנוי מתחדש מחר!", body: `המנוי ל-${name} מתחדש מחר`, tag: `sub-${d.id}` });
+        }
+      }
+
+      if (notifications.length === 0) continue;
+
+      const invalidUids = [];
+      for (const { title, body, tag } of notifications) {
+        for (const { uid, token } of tokens) {
+          try {
+            await fcm.send({
+              token,
+              notification: { title, body },
+              webpush: { notification: { title, body, icon: "/icon-192-v2.png", tag, renotify: true } },
+            });
+          } catch (e) {
+            console.error(`Send failed uid=${uid}: ${e.message}`);
+            if (e.code === "messaging/registration-token-not-registered") invalidUids.push(uid);
+          }
+        }
+      }
+
+      for (const uid of [...new Set(invalidUids)]) {
+        await db.collection("users").doc(uid).update({ fcmToken: null });
+      }
+    }
+    console.log("sendDailyReminders complete");
   }
 );

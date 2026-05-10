@@ -24,3 +24,22 @@ self.addEventListener("fetch", (event) => {
     fetch(event.request).catch(() => new Response("", { status: 503, statusText: "Service Unavailable" }))
   );
 });
+
+self.addEventListener("push", (event) => {
+  if (!event.data) return;
+  const { title, body, tag } = event.data.json();
+  event.waitUntil(
+    self.registration.showNotification(title, {
+      body,
+      icon: "/icon-192-v2.png",
+      badge: "/icon-192-v2.png",
+      tag: tag || "homio",
+      renotify: true,
+    })
+  );
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  event.waitUntil(self.clients.openWindow("/"));
+});

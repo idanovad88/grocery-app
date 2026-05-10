@@ -161,6 +161,11 @@ service cloud.firestore {
       }
     }
 
+    // FCM token storage — each user can only read/write their own doc
+    match /users/{uid} {
+      allow read, write: if signedIn() && request.auth.uid == uid;
+    }
+
     // Deny everything else (legacy root-level collections, etc.)
     match /{document=**} {
       allow read, write: if false;
