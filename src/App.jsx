@@ -34,7 +34,7 @@ const storage = getStorage(app);
 const functions = getFunctions(app);
 const messaging = getMessaging(app);
 // Replace with the public VAPID key from Firebase Console → Project Settings → Cloud Messaging → Web Push certificates
-const VAPID_KEY = "YOUR_VAPID_PUBLIC_KEY";
+const VAPID_KEY = "BBSId-fmO13Rix8h9KBFLtmX2WLB_xZZztTGlv-LObGyzZaw-PkQgY9cSF7-OSmEL8XsqaTEpnVqgMRD7xEnonM";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
