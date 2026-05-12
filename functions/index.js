@@ -188,13 +188,13 @@ ${text.slice(0, 5000)}`,
 );
 
 exports.sendDailyReminders = onSchedule(
-  { schedule: "0 7 * * *", timeZone: "Asia/Jerusalem", region: "us-central1" },
+  { schedule: "0 9 * * *", timeZone: "Asia/Jerusalem", region: "us-central1" },
   async () => {
     const db  = getFirestore();
     const fcm = getMessaging();
 
     const tomorrow      = new Date();
-    tomorrow.setDate(tomorrow.getDate() + 9);
+    tomorrow.setDate(tomorrow.getDate() + 1);
     const tomorrowStr   = tomorrow.toISOString().split("T")[0]; // "YYYY-MM-DD"
     const tomorrowMonth = tomorrow.getMonth() + 1;
     const tomorrowDay   = tomorrow.getDate();
@@ -225,7 +225,7 @@ exports.sendDailyReminders = onSchedule(
         if (!date) continue;
         const [, m, day] = date.split("-").map(Number);
         if (m === tomorrowMonth && day === tomorrowDay) {
-          notifications.push({ title: "🎂 יום הולדת בעוד 9 ימים!", body: `יום ההולדת של ${name} בעוד 9 ימים`, tag: `birthday-${d.id}` });
+          notifications.push({ title: "🎂 יום הולדת מחר!", body: `מחר יום ההולדת של ${name}`, tag: `birthday-${d.id}` });
         }
       }
 
@@ -236,7 +236,7 @@ exports.sendDailyReminders = onSchedule(
       for (const d of billsSnap.docs) {
         const { provider, amount, dueDate } = d.data();
         if (dueDate === tomorrowStr) {
-          notifications.push({ title: "💰 חשבון לתשלום בעוד 9 ימים!", body: `${provider}${amount ? ` — ${amount}₪` : ""}`, tag: `bill-${d.id}` });
+          notifications.push({ title: "💰 חשבון לתשלום מחר!", body: `${provider}${amount ? ` — ${amount}₪` : ""}`, tag: `bill-${d.id}` });
         }
       }
 
@@ -245,7 +245,7 @@ exports.sendDailyReminders = onSchedule(
       for (const d of subsSnap.docs) {
         const { name, renewalDate } = d.data();
         if (renewalDate === tomorrowStr) {
-          notifications.push({ title: "📺 מנוי מתחדש בעוד 9 ימים!", body: `המנוי ל-${name} מתחדש בעוד 9 ימים`, tag: `sub-${d.id}` });
+          notifications.push({ title: "📺 מנוי מתחדש מחר!", body: `המנוי ל-${name} מתחדש מחר`, tag: `sub-${d.id}` });
         }
       }
 
