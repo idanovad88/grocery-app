@@ -188,7 +188,7 @@ ${text.slice(0, 5000)}`,
 );
 
 exports.sendDailyReminders = onSchedule(
-  { schedule: "0 9 * * *", timeZone: "Asia/Jerusalem", region: "us-central1" },
+  { schedule: "30 9 * * *", timeZone: "Asia/Jerusalem", region: "us-central1" },
   async () => {
     const db  = getFirestore();
     const fcm = getMessaging();
