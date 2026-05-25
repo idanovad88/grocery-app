@@ -1034,6 +1034,10 @@ function ShoppingScreen({ userName, householdId, onBack }) {
   };
 
   const removeItem = (id, itemData) => {
+    if (pendingDelete) {
+      clearTimeout(pendingDelete.timerId);
+      deleteDoc(doc(db, "households", householdId, "items", pendingDelete.id)).catch(console.error);
+    }
     const timerId = setTimeout(async () => {
       try { await deleteDoc(doc(db, "households", householdId, "items", id)); } catch (e) { console.error(e); }
       setPendingDelete(null);
@@ -1314,6 +1318,10 @@ function CouponsScreen({ userName, householdId, onBack }) {
   };
 
   const removeCoupon = (id, couponData) => {
+    if (pendingDelete) {
+      clearTimeout(pendingDelete.timerId);
+      deleteDoc(doc(db, "households", householdId, "coupons", pendingDelete.id)).catch(console.error);
+    }
     const timerId = setTimeout(async () => {
       try { await deleteDoc(doc(db, "households", householdId, "coupons", id)); } catch (e) { console.error(e); }
       setPendingDelete(null);
@@ -1713,6 +1721,10 @@ function InsuranceScreen({ userName, householdId, onBack }) {
   };
 
   const removeInsDoc = (id, docData) => {
+    if (pendingDelete) {
+      clearTimeout(pendingDelete.timerId);
+      deleteDoc(doc(db, "households", householdId, "insurance", pendingDelete.id)).catch(console.error);
+    }
     const timerId = setTimeout(async () => {
       try { await deleteDoc(doc(db, "households", householdId, "insurance", id)); } catch (e) { console.error(e); }
       setPendingDelete(null);
@@ -2087,6 +2099,10 @@ function PersonalDocsScreen({ userName, householdId, onBack }) {
   };
 
   const removePersDoc = (id, docData) => {
+    if (pendingDelete) {
+      clearTimeout(pendingDelete.timerId);
+      deleteDoc(doc(db, "households", householdId, "personal_docs", pendingDelete.id)).catch(console.error);
+    }
     const timerId = setTimeout(async () => {
       try { await deleteDoc(doc(db, "households", householdId, "personal_docs", id)); } catch (e) { console.error(e); }
       setPendingDelete(null);
@@ -2550,7 +2566,10 @@ function BirthdaysScreen({ userName, householdId, onBack }) {
   };
 
   const removeBirthday = (id, bdayData) => {
-    if (pendingDelete) clearTimeout(pendingDelete.timerId);
+    if (pendingDelete) {
+      clearTimeout(pendingDelete.timerId);
+      deleteDoc(doc(db, "households", householdId, "birthdays", pendingDelete.id)).catch(console.error);
+    }
     const timerId = setTimeout(async () => {
       try { await deleteDoc(doc(db, "households", householdId, "birthdays", id)); } catch (e) { console.error(e); }
       setPendingDelete(null);
@@ -2764,7 +2783,10 @@ function ServiceProvidersScreen({ userName, householdId, onBack }) {
   };
 
   const removeProvider = (id, data) => {
-    if (pendingDelete) clearTimeout(pendingDelete.timerId);
+    if (pendingDelete) {
+      clearTimeout(pendingDelete.timerId);
+      deleteDoc(doc(db, "households", householdId, "service_providers", pendingDelete.id)).catch(console.error);
+    }
     const timerId = setTimeout(async () => {
       try { await deleteDoc(doc(db, "households", householdId, "service_providers", id)); }
       catch (e) { console.error(e); }
@@ -3042,7 +3064,10 @@ function SubscriptionsScreen({ userName, householdId, onBack }) {
   };
 
   const removeSub = (id, subData) => {
-    if (pendingDelete) clearTimeout(pendingDelete.timerId);
+    if (pendingDelete) {
+      clearTimeout(pendingDelete.timerId);
+      deleteDoc(doc(db, "households", householdId, "subscriptions", pendingDelete.id)).catch(console.error);
+    }
     const timerId = setTimeout(async () => {
       try { await deleteDoc(doc(db, "households", householdId, "subscriptions", id)); } catch (e) { console.error(e); }
       setPendingDelete(null);
