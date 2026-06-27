@@ -3686,14 +3686,96 @@ function BillsScreen({ userName, householdId, onBack }) {
 // ─── ImageLightbox ────────────────────────────────────────────────────────────
 
 function ImageLightbox({ src, onClose }) {
+  const [scale, setScale] = useState(1);
+  const [tx, setTx]       = useState(0);
+  const [ty, setTy]       = useState(0);
+  const g = useRef({ mode: null, startDist: 0, startScale: 1, startX: 0, startY: 0, startTx: 0, startTy: 0, moved: false, lastTap: 0 });
+
+  // reset zoom whenever a new image opens
+  useEffect(() => { setScale(1); setTx(0); setTy(0); }, [src]);
+
   if (!src) return null;
+
+  const MAX_SCALE = 5;
+  const clamp = (s) => Math.min(Math.max(s, 1), MAX_SCALE);
+  const touchDist = (t) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+
+  const reset = () => { setScale(1); setTx(0); setTy(0); };
+
+  const onTouchStart = (e) => {
+    if (e.touches.length === 2) {
+      g.current.mode = "pinch";
+      g.current.startDist = touchDist(e.touches);
+      g.current.startScale = scale;
+    } else if (e.touches.length === 1) {
+      g.current.mode = "pan";
+      g.current.startX = e.touches[0].clientX;
+      g.current.startY = e.touches[0].clientY;
+      g.current.startTx = tx;
+      g.current.startTy = ty;
+      g.current.moved = false;
+    }
+  };
+
+  const onTouchMove = (e) => {
+    if (g.current.mode === "pinch" && e.touches.length === 2) {
+      setScale(clamp(g.current.startScale * (touchDist(e.touches) / g.current.startDist)));
+    } else if (g.current.mode === "pan" && e.touches.length === 1 && scale > 1) {
+      const dx = e.touches[0].clientX - g.current.startX;
+      const dy = e.touches[0].clientY - g.current.startY;
+      if (Math.abs(dx) > 4 || Math.abs(dy) > 4) g.current.moved = true;
+      setTx(g.current.startTx + dx);
+      setTy(g.current.startTy + dy);
+    }
+  };
+
+  const onTouchEnd = (e) => {
+    const wasPinch = g.current.mode === "pinch";
+    if (scale <= 1) { setTx(0); setTy(0); }
+    // double-tap to toggle zoom
+    if (g.current.mode === "pan" && !g.current.moved && e.changedTouches.length === 1) {
+      const now = Date.now();
+      if (now - g.current.lastTap < 300) {
+        scale > 1 ? reset() : setScale(2.5);
+        g.current.lastTap = 0;
+      } else {
+        g.current.lastTap = now;
+      }
+    }
+    g.current.mode = wasPinch && e.touches.length === 1 ? "pan" : null;
+  };
+
+  const onWheel = (e) => {
+    setScale((s) => {
+      const next = clamp(s - e.deltaY * 0.002);
+      if (next <= 1) { setTx(0); setTy(0); }
+      return next;
+    });
+  };
+
+  const animating = g.current.mode === null;
+
   return (
     <div
-      onClick={onClose}
-      style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.92)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center" }}
+      onClick={() => { if (scale === 1) onClose(); }}
+      onWheel={onWheel}
+      style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.92)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden", touchAction: "none" }}
     >
-      <button onClick={onClose} style={{ position: "absolute", top: 20, left: 20, background: "rgba(255,255,255,0.15)", border: "none", borderRadius: "50%", width: 40, height: 40, fontSize: 20, color: "#fff", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
-      <img src={src} alt="" onClick={(e) => e.stopPropagation()} style={{ maxWidth: "95vw", maxHeight: "90vh", borderRadius: 12, objectFit: "contain", boxShadow: "0 8px 40px rgba(0,0,0,0.6)" }} />
+      <button onClick={(e) => { e.stopPropagation(); onClose(); }} style={{ position: "absolute", top: 20, left: 20, background: "rgba(255,255,255,0.15)", border: "none", borderRadius: "50%", width: 40, height: 40, fontSize: 20, color: "#fff", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 2 }}>✕</button>
+      {scale > 1 && (
+        <button onClick={(e) => { e.stopPropagation(); reset(); }} style={{ position: "absolute", top: 20, right: 20, background: "rgba(255,255,255,0.15)", border: "none", borderRadius: 20, padding: "8px 14px", fontSize: 13, color: "#fff", cursor: "pointer", zIndex: 2, fontFamily: "inherit" }}>איפוס תצוגה</button>
+      )}
+      <img
+        src={src}
+        alt=""
+        onClick={(e) => e.stopPropagation()}
+        onDoubleClick={(e) => { e.stopPropagation(); scale > 1 ? reset() : setScale(2.5); }}
+        onTouchStart={onTouchStart}
+        onTouchMove={onTouchMove}
+        onTouchEnd={onTouchEnd}
+        draggable={false}
+        style={{ maxWidth: "95vw", maxHeight: "90vh", borderRadius: 12, objectFit: "contain", boxShadow: "0 8px 40px rgba(0,0,0,0.6)", transform: `translate(${tx}px, ${ty}px) scale(${scale})`, transition: animating ? "transform 0.2s ease" : "none", cursor: scale > 1 ? "grab" : "zoom-in", touchAction: "none", userSelect: "none" }}
+      />
     </div>
   );
 }
